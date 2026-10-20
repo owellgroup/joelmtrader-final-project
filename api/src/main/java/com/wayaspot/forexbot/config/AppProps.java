@@ -21,4 +21,7 @@ public class AppProps {
     private String brandName;
     private String encryptionKey;
     private String dailyReportCron;
+    private String fcmProjectId = "";
+    private String fcmClientEmail = "";
+    private String fcmPrivateKey = "";
 }

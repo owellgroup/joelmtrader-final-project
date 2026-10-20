@@ -27,13 +27,13 @@ public class ReportService {
     private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("dd MMM HH:mm").withZone(ZoneOffset.UTC);
     private final TradeRepository trades;
     private final BotSessionRepository sessions;
-    private final EmailService email;
+    private final PushService push;
     private final AppProps props;
 
-    public ReportService(TradeRepository trades, BotSessionRepository sessions, EmailService email, AppProps props) {
+    public ReportService(TradeRepository trades, BotSessionRepository sessions, PushService push, AppProps props) {
         this.trades = trades;
         this.sessions = sessions;
-        this.email = email;
+        this.push = push;
         this.props = props;
     }
 
@@ -96,9 +96,13 @@ public class ReportService {
             List<Trade> closed = trades.findBySessionIdOrderByOpenTimeAsc(sessionId).stream()
                     .filter(t -> "CLOSED".equals(t.getStatus())).toList();
             Double open = s.getOpeningBalance(), close = s.getClosingBalance();
-            double net = (open != null && close != null) ? close - open : TradeStats.of(closed).net;
-            boolean ok = email.sendNow("Bot stopped - session result " + signed(net), sessionHtml(s, closed));
-            s.setEmailSent(ok);
+            TradeStats st = TradeStats.of(closed);
+            double net = (open != null && close != null) ? close - open : st.net;
+            push.notify("SESSION_REPORT", "Session result " + signed(net),
+                    String.format("%d trades · win rate %.0f%% · profit factor %.2f · net %s",
+                            st.trades, st.winRate(), st.profitFactor(), signed(net)),
+                    net < 0 ? "WARNING" : "INFO");
+            s.setEmailSent(true);
             sessions.save(s);
         } catch (Exception e) {
             log.error("session report failed", e);
@@ -131,14 +135,17 @@ public class ReportService {
                 new String[]{"Worst trade", signed(st.worst), "#dc2626"})));
         b.append(section("By pair")).append(symbolTable(st)).append(section("All trades"));
         tradeRows(closed, b);
-        return email.sendNow("Daily trading report " + day + " - " + signed(st.net),
-                wrap(props.getBrandName(), props.getLogoUrl(), "Daily trading report", day.toString(), b.toString()));
+        push.notify("DAILY_REPORT", "Daily report " + day,
+                String.format("Net %s · %d trades · win rate %.0f%% · profit factor %.2f",
+                        signed(st.net), st.trades, st.winRate(), st.profitFactor()),
+                st.net < 0 ? "WARNING" : "INFO");
+        return true;
     }
 
     public boolean sendTest() {
-        String body = "<p style=\"font-size:14px\">Your e-mail setup works. You will receive a summary whenever you stop the bot, a daily digest, and important risk alerts.</p>";
-        return email.sendNow("Test e-mail from " + props.getBrandName(),
-                wrap(props.getBrandName(), props.getLogoUrl(), "E-mail test", "Everything is configured correctly", body));
+        push.notify("TEST", "Test notification",
+                "Push alerts are on. Entries, starts, stops, and reports arrive here instead of e-mail.", "INFO");
+        return true;
     }
 
     private static String fmtDuration(Duration d) {

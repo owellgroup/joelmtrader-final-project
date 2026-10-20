@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "319928983721",
+    "project_id": "joelmtrader-598ac",
+    "storage_bucket": "joelmtrader-598ac.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:319928983721:android:e4756c243e61f3bcc549b8",
+        "android_client_info": {
+          "package_name": "com.wayaspot.waya_fx_bot"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDjD5172phC5FUsf-636gKdppUq9XdEpvs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

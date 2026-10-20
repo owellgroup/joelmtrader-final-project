@@ -32,6 +32,9 @@ services:
       ENGINE_API_KEY: ${ENGINE_API_KEY:-a293bc338ba95dbd8bcfb55aa4ab99a13f51351f712d034c}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-f262fe05a3c754a7aa5f5457ad3b4f5fabfe9487fb2b4adc}
       ENGINE_URL: ${ENGINE_URL_OVERRIDE:-http://engine:8000}
+      FCM_PROJECT_ID: ${FCM_PROJECT_ID:-}
+      FCM_CLIENT_EMAIL: ${FCM_CLIENT_EMAIL:-}
+      FCM_PRIVATE_KEY: ${FCM_PRIVATE_KEY:-}
     ports:
       - "8080:8080"
     depends_on:

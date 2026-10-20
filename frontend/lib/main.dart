@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/app_state.dart';
+import 'core/push_bridge.dart';
 import 'core/theme.dart';
 import 'core/utils.dart';
 import 'pages/login_page.dart';
@@ -13,8 +14,38 @@ Future<void> main() async {
   runApp(ChangeNotifierProvider.value(value: state, child: const WayaApp()));
 }
 
-class WayaApp extends StatelessWidget {
+class WayaApp extends StatefulWidget {
   const WayaApp({super.key});
+  @override
+  State<WayaApp> createState() => _WayaAppState();
+}
+
+class _WayaAppState extends State<WayaApp> {
+  final _push = PushBridge();
+
+  @override
+  void initState() {
+    super.initState();
+    final state = context.read<AppState>();
+    state.addListener(_syncPush);
+    _syncPush();
+  }
+
+  void _syncPush() {
+    final state = context.read<AppState>();
+    if (state.loggedIn) {
+      _push.start(state);
+    } else {
+      _push.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    context.read<AppState>().removeListener(_syncPush);
+    _push.stop();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -25,6 +56,7 @@ class WayaApp extends StatelessWidget {
       theme: buildTheme(Brightness.light),
       darkTheme: buildTheme(Brightness.dark),
       themeMode: s.themeMode,
+      builder: (context, child) => SelectionArea(child: child ?? const SizedBox.shrink()),
       home: AnimatedSwitcher(
         duration: const Duration(milliseconds: 400),
         child: !s.ready

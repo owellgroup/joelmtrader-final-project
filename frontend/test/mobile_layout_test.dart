@@ -107,7 +107,7 @@ void main() {
     final state = await _state();
     await tester.pumpWidget(_app(state, const Scaffold(body: ReportsPage())));
     await tester.pumpAndSettle();
-    expect(find.text('A summary e-mail is sent whenever you press Stop trade'), findsOneWidget);
+    expect(find.text('A push notification is sent whenever you press Stop trade'), findsOneWidget);
     expect(find.text('Send daily digest'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

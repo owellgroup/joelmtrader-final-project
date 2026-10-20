@@ -28,14 +28,14 @@ public class BotService {
     private final SettingsService settings;
     private final CryptoService crypto;
     private final ReportService reports;
-    private final EmailService email;
+    private final PushService push;
     private volatile long engineDownSince = 0;
     private volatile long lastConnectTry = 0;
     private volatile long lastDownAlert = 0;
 
     public BotService(EngineClient engine, BotSessionRepository sessions, TransactionRepository txs,
                       AccountSnapshotRepository snapshots, SettingsService settings, CryptoService crypto,
-                      ReportService reports, EmailService email) {
+                      ReportService reports, PushService push) {
         this.engine = engine;
         this.sessions = sessions;
         this.txs = txs;
@@ -43,7 +43,7 @@ public class BotService {
         this.settings = settings;
         this.crypto = crypto;
         this.reports = reports;
-        this.email = email;
+        this.push = push;
     }
 
     public Optional<BotSession> running() {
@@ -85,6 +85,7 @@ public class BotService {
         tx.setBalanceAfter(s.getOpeningBalance());
         tx.setRemark("Bot started - opening balance " + EmailTemplates.money(s.getOpeningBalance()));
         txs.save(tx);
+        push.notify("BOT_START", "Bot started", "Scanning the markets. Opening balance " + EmailTemplates.money(s.getOpeningBalance()) + ".", "INFO");
         return status();
     }
 
@@ -113,9 +114,11 @@ public class BotService {
         tx.setBalanceBefore(s.getOpeningBalance());
         tx.setBalanceAfter(closing);
         tx.setAmount(closing == null || s.getOpeningBalance() == null ? null : closing - s.getOpeningBalance());
-        tx.setRemark("Bot stopped" + (closePositions ? " (open positions closed)" : " (positions left open with SL/TP)"));
+        String stopNote = "Bot stopped" + (closePositions ? ". Open positions were closed." : ". Open trades keep their stop-loss and take-profit.");
+        tx.setRemark(stopNote);
         txs.save(tx);
-        reports.sendSessionReport(s.getId());       // @Async - session e-mail
+        push.notify("BOT_STOP", "Bot stopped", stopNote, "WARNING");
+        reports.sendSessionReport(s.getId());
         return status();
     }
 
@@ -170,8 +173,8 @@ public class BotService {
             if (engineDownSince == 0) engineDownSince = now;
             if (running().isPresent() && now - engineDownSince > 300_000 && now - lastDownAlert > 1_800_000) {
                 lastDownAlert = now;
-                email.sendAlert("Trading engine unreachable",
-                        "The Python engine has been unreachable for over 5 minutes while the bot was running. Open positions keep their stop-loss/take-profit at the broker. Check the server.", "CRITICAL");
+                push.notify("ENGINE_DOWN", "Trading engine unreachable",
+                        "The trading engine has been unreachable for over 5 minutes while the bot was running. Open positions keep their stop-loss and take-profit at the broker.", "CRITICAL");
             }
         } catch (Exception e) {
             log.warn("watchdog error: {}", e.getMessage());

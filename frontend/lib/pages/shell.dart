@@ -8,6 +8,7 @@ import 'admins_page.dart';
 import 'charts_page.dart';
 import 'dashboard_page.dart';
 import 'news_page.dart';
+import 'notifications_page.dart';
 import 'positions_page.dart';
 import 'reports_page.dart';
 import 'settings_page.dart';
@@ -35,6 +36,7 @@ class _ShellState extends State<Shell> {
 
   late final List<_Item> _items = [
     _Item('Dashboard', Icons.dashboard_rounded, () => const DashboardPage()),
+    _Item('Alerts', Icons.notifications_rounded, () => const NotificationsPage()),
     _Item('Charts & Analysis', Icons.candlestick_chart_rounded, () => const ChartsPage()),
     _Item('Trades', Icons.swap_vert_circle_rounded, () => const PositionsPage()),
     _Item('Transactions', Icons.receipt_long_rounded, () => const TransactionsPage()),
@@ -96,7 +98,7 @@ class _ShellState extends State<Shell> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 14),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const BrandLogo(height: 48),
+              const BrandLogo(height: 64),
               const SizedBox(height: 8),
               Text('TRADING DESK', style: TextStyle(fontSize: 11, color: Palette.brand, fontWeight: FontWeight.w800, letterSpacing: 1.6)),
             ]),
@@ -158,6 +160,15 @@ class _ShellState extends State<Shell> {
           leading: wide ? null : IconButton(icon: const Icon(Icons.menu_rounded), onPressed: () => _scaffold.currentState?.openDrawer()),
           title: Text(_items[_index].label, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800)),
           actions: [
+            IconButton(
+              tooltip: 'Alerts',
+              onPressed: () => setState(() => _index = 1),
+              icon: Badge(
+                isLabelVisible: s.unreadAlerts > 0,
+                label: Text('${s.unreadAlerts > 99 ? '99+' : s.unreadAlerts}'),
+                child: const Icon(Icons.notifications_rounded),
+              ),
+            ),
             if (wide)
               Padding(
                 padding: const EdgeInsets.only(right: 6),

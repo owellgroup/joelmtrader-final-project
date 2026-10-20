@@ -42,6 +42,9 @@ class AppIcon extends StatelessWidget {
       width: size,
       height: size,
       fit: BoxFit.contain,
+      alignment: Alignment.center,
+      clipBehavior: Clip.none,
+      excludeFromSemantics: true,
     );
   }
 }
@@ -56,7 +59,11 @@ class BrandLogo extends StatelessWidget {
     return SvgPicture.asset(
       'assets/images/logo.svg',
       height: height,
+      width: height * (2047 / 801),
       fit: BoxFit.contain,
+      alignment: Alignment.centerLeft,
+      clipBehavior: Clip.none,
+      excludeFromSemantics: true,
     );
   }
 }

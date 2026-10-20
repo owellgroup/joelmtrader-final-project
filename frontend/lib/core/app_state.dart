@@ -12,6 +12,7 @@ class AppState extends ChangeNotifier {
   late Api api;
   bool ready = false;
   bool offlineWarning = false;
+  int unreadAlerts = 0;
   Map<String, dynamic>? user;
   ThemeMode themeMode = ThemeMode.light; // white by default
 
@@ -89,4 +90,10 @@ class AppState extends ChangeNotifier {
   }
 
   void toggleTheme() => setTheme(themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark);
+
+  void setUnreadAlerts(int count) {
+    if (unreadAlerts == count) return;
+    unreadAlerts = count;
+    notifyListeners();
+  }
 }

@@ -25,16 +25,16 @@ public class EventService {
     private final TransactionRepository txs;
     private final AccountSnapshotRepository snapshots;
     private final LiveState live;
-    private final EmailService email;
+    private final PushService push;
     private final ObjectMapper mapper;
 
     public EventService(TradeRepository trades, TransactionRepository txs, AccountSnapshotRepository snapshots,
-                        LiveState live, EmailService email, ObjectMapper mapper) {
+                        LiveState live, PushService push, ObjectMapper mapper) {
         this.trades = trades;
         this.txs = txs;
         this.snapshots = snapshots;
         this.live = live;
-        this.email = email;
+        this.push = push;
         this.mapper = mapper;
     }
 
@@ -87,9 +87,11 @@ public class EventService {
         tx.setBalanceBefore(t.getBalanceBefore());
         tx.setBalanceAfter(t.getBalanceBefore());
         tx.setSessionId(sessionId);
-        tx.setRemark(String.format("Opened %s %s %.2f lots @ %s | SL %s TP %s | %s (score %.0f)", t.getSide(), t.getSymbol(),
-                t.getLots(), t.getOpenPrice(), t.getStopLoss(), t.getTakeProfit(), t.getSetup(), t.getScore() == null ? 0 : t.getScore()));
+        String detail = String.format("Opened %s %s %.2f lots @ %s | SL %s TP %s | %s (score %.0f)", t.getSide(), t.getSymbol(),
+                t.getLots(), t.getOpenPrice(), t.getStopLoss(), t.getTakeProfit(), t.getSetup(), t.getScore() == null ? 0 : t.getScore());
+        tx.setRemark(detail);
         txs.save(tx);
+        push.notify("TRADE_OPENED", "Valid entry · " + t.getSymbol(), detail, "INFO");
     }
 
     private void closed(Map<String, Object> d, Long sessionId) {
@@ -127,6 +129,11 @@ public class EventService {
         tx.setSessionId(sessionId != null ? sessionId : t.getSessionId());
         tx.setRemark(t.getResult() + " - " + t.getRemark());
         txs.save(tx);
+        String money = t.getNetProfit() == null ? "" : String.format(" · P/L %.2f", t.getNetProfit());
+        push.notify("TRADE_CLOSED", t.getResult() + " · " + t.getSymbol(),
+                (t.getSide() == null ? "" : t.getSide() + " ") + t.getSymbol() + " closed" + money
+                        + (t.getCloseReason() == null ? "" : " · " + t.getCloseReason()),
+                net < -0.005 ? "WARNING" : "INFO");
     }
 
     private void snapshot(Map<String, Object> d, Long sessionId) {
@@ -151,6 +158,6 @@ public class EventService {
             tx.setSessionId(sessionId);
             txs.save(tx);
         }
-        email.sendAlert(subject == null ? "Bot alert" : subject, message == null ? "" : message, severity);
+        push.notify("ALERT", subject == null ? "Bot alert" : subject, message == null ? "" : message, severity);
     }
 }

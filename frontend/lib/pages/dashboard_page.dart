@@ -122,7 +122,7 @@ class _DashboardPageState extends State<DashboardPage> {
         builder: (ctx, setS) => AlertDialog(
           title: const Text('Stop trading?'),
           content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('The bot will stop scanning and opening trades. A summary e-mail will be sent.'),
+            const Text('The bot will stop scanning and opening trades. A push notification will pop up on your devices.'),
             const SizedBox(height: 8),
             CheckboxListTile(
               contentPadding: EdgeInsets.zero,
@@ -143,7 +143,7 @@ class _DashboardPageState extends State<DashboardPage> {
     setState(() => _busy = true);
     try {
       await api.post('/api/bot/stop', body: {'closePositions': close});
-      if (mounted) context.toast('Bot stopped. Session report is being e-mailed.');
+      if (mounted) context.toast('Bot stopped. A push notification is on its way.');
       await _loadDash();
     } on ApiException catch (e) {
       if (mounted) context.toast(e.message, error: true);
@@ -275,6 +275,8 @@ class _Hero extends StatelessWidget {
       child: LayoutBuilder(builder: (context, c) {
         final narrow = c.maxWidth < 700;
         final info = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const BrandLogo(height: 132),
+          const SizedBox(height: 16),
           Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
             StatusPill(status, color, pulse: running),
             if (engine['mode'] == 'paper') const Tag('PAPER MODE', Palette.gold),

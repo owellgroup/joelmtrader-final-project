@@ -52,7 +52,7 @@ class _ReportsPageState extends State<ReportsPage> {
       child: ListView(padding: const EdgeInsets.all(16), children: [
         AppCard(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const SectionTitle('Session reports', subtitle: 'A summary e-mail is sent whenever you press Stop trade'),
+            const SectionTitle('Session reports', subtitle: 'A push notification is sent whenever you press Stop trade'),
             LayoutBuilder(builder: (context, c) {
               final narrow = c.maxWidth < 520;
               final daily = OutlinedButton.icon(
@@ -61,9 +61,9 @@ class _ReportsPageState extends State<ReportsPage> {
                 label: const Text('Send daily digest'),
               );
               final test = OutlinedButton.icon(
-                onPressed: () => _act(() => api.post('/api/settings/test-email'), 'Test e-mail sent'),
-                icon: const Icon(Icons.mail_outline_rounded, size: 18),
-                label: const Text('Test e-mail'),
+                onPressed: () => _act(() => api.post('/api/settings/test-email'), 'Test push sent'),
+                icon: const Icon(Icons.notifications_active_rounded, size: 18),
+                label: const Text('Test push'),
               );
               if (narrow) {
                 return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -108,12 +108,12 @@ class _ReportsPageState extends State<ReportsPage> {
         if (s['note'] != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text(s['note'].toString(), style: const TextStyle(fontSize: 11.5, color: Palette.gold))),
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
-          Icon(s['emailSent'] == true ? Icons.mark_email_read_rounded : Icons.mail_outline_rounded, size: 16, color: s['emailSent'] == true ? Palette.green : context.muted),
-          Text(s['emailSent'] == true ? 'Report e-mailed' : 'Not e-mailed', style: TextStyle(fontSize: 12.5, color: context.muted)),
+          Icon(s['emailSent'] == true ? Icons.notifications_active_rounded : Icons.notifications_off_rounded, size: 16, color: s['emailSent'] == true ? Palette.green : context.muted),
+          Text(s['emailSent'] == true ? 'Push sent' : 'Not pushed', style: TextStyle(fontSize: 12.5, color: context.muted)),
           if (!running)
             TextButton(
-              onPressed: () => _act(() => api.post('/api/reports/sessions/${s['id']}/resend'), 'Report queued'),
-              child: const Text('Resend e-mail'),
+              onPressed: () => _act(() => api.post('/api/reports/sessions/${s['id']}/resend'), 'Push queued'),
+              child: const Text('Send push again'),
             ),
         ]),
       ]),

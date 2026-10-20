@@ -19,6 +19,11 @@ ThemeData buildTheme(Brightness b) {
     brightness: b,
     scaffoldBackgroundColor: scheme.surface,
     splashFactory: InkRipple.splashFactory,
+    textSelectionTheme: TextSelectionThemeData(
+      cursorColor: primary,
+      selectionColor: primary.withValues(alpha: 0.28),
+      selectionHandleColor: primary,
+    ),
     pageTransitionsTheme: const PageTransitionsTheme(builders: {
       TargetPlatform.android: FadeUpwardsPageTransitionsBuilder(),
       TargetPlatform.iOS: FadeUpwardsPageTransitionsBuilder(),

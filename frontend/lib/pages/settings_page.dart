@@ -224,7 +224,13 @@ class _SettingsPageState extends State<SettingsPage> {
       AppCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const SectionTitle('App connection'),
-          TextField(controller: _url, decoration: const InputDecoration(labelText: 'Backend URL', prefixIcon: Icon(Icons.dns_outlined))),
+          TextField(
+            controller: _url,
+            enableInteractiveSelection: true,
+            keyboardType: TextInputType.url,
+            contextMenuBuilder: (context, state) => AdaptiveTextSelectionToolbar.editableText(editableTextState: state),
+            decoration: const InputDecoration(labelText: 'Backend URL', prefixIcon: Icon(Icons.dns_outlined)),
+          ),
           const SizedBox(height: 10),
           Wrap(spacing: 10, children: [
             OutlinedButton(onPressed: () async {
@@ -235,11 +241,11 @@ class _SettingsPageState extends State<SettingsPage> {
             OutlinedButton.icon(onPressed: () async {
               try {
                 final r = await api.post('/api/settings/test-email');
-                if (mounted) context.toast(r['sent'] == true ? 'Test e-mail sent' : 'E-mail failed - check SMTP settings', error: r['sent'] != true);
+                if (mounted) context.toast(r['sent'] == true ? 'Test push sent' : 'Push failed - check the FCM settings in .env', error: r['sent'] != true);
               } on ApiException catch (e) {
                 if (mounted) context.toast(e.message, error: true);
               }
-            }, icon: const Icon(Icons.mail_outline_rounded), label: const Text('Send test e-mail')),
+            }, icon: const Icon(Icons.notifications_active_rounded), label: const Text('Send test push')),
           ]),
           const Divider(height: 30),
           LayoutBuilder(builder: (context, c) {

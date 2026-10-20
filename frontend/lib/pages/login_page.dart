@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../core/api.dart';
 import '../core/app_state.dart';
@@ -43,6 +44,7 @@ class _LoginPageState extends State<LoginPage> {
       _error = null;
     });
     try {
+      TextInput.finishAutofillContext(shouldSave: true);
       await context.read<AppState>().login(_url.text, _user.text, _pass.text);
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
@@ -80,24 +82,31 @@ class _LoginPageState extends State<LoginPage> {
                       BoxShadow(color: const Color(0xFF0000FF).withValues(alpha: dark ? 0.22 : 0.12), blurRadius: 48, offset: const Offset(0, 22)),
                     ],
                   ),
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    const BrandLogo(height: 72),
+                  child: AutofillGroup(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    const BrandLogo(height: 96),
                     const SizedBox(height: 18),
                     Text('Sign in to the trading desk', style: TextStyle(color: context.muted, fontSize: 14, fontWeight: FontWeight.w600)),
                     const SizedBox(height: 26),
                     TextField(
                       controller: _user,
+                      enableInteractiveSelection: true,
                       keyboardType: TextInputType.emailAddress,
-                      autofillHints: const [AutofillHints.username],
+                      autofillHints: const [AutofillHints.username, AutofillHints.email],
                       textInputAction: TextInputAction.next,
+                      autocorrect: false,
+                      contextMenuBuilder: (context, state) => AdaptiveTextSelectionToolbar.editableText(editableTextState: state),
                       decoration: const InputDecoration(labelText: 'Username', prefixIcon: Icon(Icons.person_outline_rounded)),
                     ),
                     const SizedBox(height: 14),
                     TextField(
                       controller: _pass,
+                      enableInteractiveSelection: true,
                       obscureText: _hide,
                       autofillHints: const [AutofillHints.password],
+                      textInputAction: TextInputAction.done,
+                      onEditingComplete: () => TextInput.finishAutofillContext(shouldSave: true),
                       onSubmitted: (_) => _login(),
+                      contextMenuBuilder: (context, state) => AdaptiveTextSelectionToolbar.editableText(editableTextState: state),
                       decoration: InputDecoration(
                         labelText: 'Password',
                         prefixIcon: const Icon(Icons.lock_outline_rounded),
@@ -115,6 +124,10 @@ class _LoginPageState extends State<LoginPage> {
                               padding: const EdgeInsets.only(top: 14),
                               child: TextField(
                                 controller: _url,
+                                enableInteractiveSelection: true,
+                                keyboardType: TextInputType.url,
+                                autofillHints: const [AutofillHints.url],
+                                contextMenuBuilder: (context, state) => AdaptiveTextSelectionToolbar.editableText(editableTextState: state),
                                 decoration: const InputDecoration(labelText: 'Live backend URL', prefixIcon: Icon(Icons.dns_outlined), hintText: 'http://145.241.187.174:8088'),
                               ),
                             )
@@ -155,7 +168,7 @@ class _LoginPageState extends State<LoginPage> {
                       textAlign: TextAlign.center,
                       style: TextStyle(color: context.muted, fontSize: 11.5, height: 1.4),
                     ),
-                  ]),
+                  ])),
                 ),
               ),
             ),

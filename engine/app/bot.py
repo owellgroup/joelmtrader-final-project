@@ -60,6 +60,7 @@ class Bot:
         self.tracked, self.close_reason, self.sym_cooldown = {}, {}, {}
         self.last_entry = 0
         self.scan_data, self.last_scan_ts, self.last_scan_push, self.last_snapshot = None, 0, 0, 0
+        self._found_key, self._found_at = None, 0
         self.activity = deque(maxlen=60)
         self.stats = dict(opened=0, closed=0, wins=0, losses=0, pnl=0.0)
         self.info_cache = {}
@@ -212,6 +213,7 @@ class Bot:
             why = "Waiting for market data"
         self.scan_data = {"time": int(time.time()), "rankings": ranks, "chosen": chosen["symbol"] if chosen else None,
                           "why": why, "news": self._news_state(), "running": self.enabled}
+        self._announce_found(chosen)
         self.last_scan_ts = time.time()
         if time.time() - self.last_scan_push > 15:
             self.last_scan_push = time.time()
@@ -223,6 +225,25 @@ class Bot:
             b, reason = self.news.blocked(s, self.cfg)
             out[s] = {"blocked": b, "reason": reason}
         return out
+
+    def _announce_found(self, chosen):
+        """One alert per new tradable setup, through the same notification path as entries."""
+        if not self.enabled:
+            return
+        if not chosen:
+            if self._found_key and time.time() - self._found_at > 600:
+                self._found_key = None
+            return
+        key = f"{chosen['symbol']}|{chosen['side']}|{chosen['setup']}"
+        if key == self._found_key:
+            return
+        self._found_key, self._found_at = key, time.time()
+        plan = chosen.get("plan") or {}
+        self.log_event(f"Found {chosen['side']} {chosen['symbol']} score {chosen['score']:.0f} ({chosen['setup']})")
+        self.rep.emit("TRADE_FOUND", dict(symbol=chosen["symbol"], side=chosen["side"], score=chosen["score"],
+                                           setup=chosen["setup"], rr=chosen["rr"], entry=plan.get("entry"),
+                                           sl=plan.get("sl"), tp=plan.get("tp"), reasons=(chosen.get("reasons") or [])[:4]),
+                      self.session_id)
 
     def force_scan(self):
         with self.lock:

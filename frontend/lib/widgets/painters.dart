@@ -65,7 +65,13 @@ class CandlePainter extends CustomPainter {
   final Set<String> layers;
   final bool dark;
   final Offset? cursor;
-  CandlePainter(this.data, this.layers, this.dark, this.cursor);
+  /// Left edge as a candle index. Null keeps the original fitted view.
+  final double? viewStart;
+  /// How many candles fit across the plot. Null keeps the original fitted view.
+  final double? viewSpan;
+  final double priceZoom;
+  final double priceShift;
+  CandlePainter(this.data, this.layers, this.dark, this.cursor, {this.viewStart, this.viewSpan, this.priceZoom = 1, this.priceShift = 0});
 
   static const double rightPad = 64, bottomPad = 22, topPad = 8;
 
@@ -80,11 +86,17 @@ class CandlePainter extends CustomPainter {
     final fg = dark ? const Color(0xFFCBD5E1) : const Color(0xFF334155);
     final grid = (dark ? Colors.white : Colors.black).withOpacity(0.07);
     final chartW = size.width - rightPad, chartH = size.height - bottomPad - topPad;
-    final cw = chartW / (n + 2);
+    final fitted = viewSpan == null || viewStart == null;
+    final span = fitted ? n + 2.0 : viewSpan!.clamp(8, n * 3).toDouble();
+    final start = fitted ? -0.5 : viewStart!;
+    final cw = chartW / span;
 
-    // ---- price range
+    // ---- price range from the candles actually on screen
     var lo = double.infinity, hi = -double.infinity;
-    for (final c in candles) {
+    final i0 = start.floor().clamp(0, n - 1).toInt();
+    final i1 = (start + span).ceil().clamp(i0, n - 1).toInt();
+    for (var k = i0; k <= i1; k++) {
+      final c = candles[k];
       lo = math.min(lo, d(c[3]));
       hi = math.max(hi, d(c[2]));
     }
@@ -101,8 +113,15 @@ class CandlePainter extends CustomPainter {
     final padR = (hi - lo) * 0.06;
     lo -= padR;
     hi += padR;
+    if (priceZoom != 1 || priceShift != 0) {
+      final mid = (hi + lo) / 2;
+      final half = (hi - lo) / 2 / priceZoom.clamp(0.35, 8);
+      final shift = priceShift * (hi - lo);
+      lo = mid - half + shift;
+      hi = mid + half + shift;
+    }
     double yOf(double p) => topPad + (hi - p) / (hi - lo) * chartH;
-    double xOfIdx(double idx) => (idx + 0.5) * cw;
+    double xOfIdx(double idx) => (idx - start) * cw;
     double xOfT(num t) => xOfIdx((t - t0) / tfSec);
     final rect = Rect.fromLTWH(0, topPad, chartW, chartH);
 
@@ -262,7 +281,7 @@ class CandlePainter extends CustomPainter {
 
     // ---- crosshair
     if (cursor != null && cursor!.dx < chartW && cursor!.dy > topPad && cursor!.dy < topPad + chartH) {
-      final idx = (cursor!.dx / cw - 0.5).round().clamp(0, n - 1);
+      final idx = (start + cursor!.dx / cw).round().clamp(0, n - 1);
       final c = candles[idx];
       final cp = Paint()..color = fg.withOpacity(0.5)..strokeWidth = 0.8;
       canvas.drawLine(Offset(xOfIdx(idx.toDouble()), topPad), Offset(xOfIdx(idx.toDouble()), topPad + chartH), cp);

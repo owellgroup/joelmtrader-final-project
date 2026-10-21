@@ -172,7 +172,7 @@ class _AlertCard extends StatelessWidget {
 
   static Color _color(String type, String severity) {
     if (severity == 'CRITICAL' || type == 'ENGINE_DOWN') return Palette.red;
-    if (type == 'TRADE_OPENED' || type == 'BOT_START') return Palette.green;
+    if (type == 'TRADE_OPENED' || type == 'TRADE_FOUND' || type == 'BOT_START') return Palette.green;
     if (type == 'BOT_STOP' || type == 'TRADE_CLOSED' && severity == 'WARNING') return Palette.gold;
     if (type.contains('REPORT')) return Palette.blue;
     return Palette.brand;
@@ -182,6 +182,8 @@ class _AlertCard extends StatelessWidget {
     switch (type) {
       case 'TRADE_OPENED':
         return Icons.login_rounded;
+      case 'TRADE_FOUND':
+        return Icons.saved_search_rounded;
       case 'TRADE_CLOSED':
         return Icons.flag_rounded;
       case 'BOT_START':

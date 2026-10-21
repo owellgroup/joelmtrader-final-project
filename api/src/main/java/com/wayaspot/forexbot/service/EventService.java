@@ -47,6 +47,7 @@ public class EventService {
         if (type == null) return;
         switch (type) {
             case "TRADE_OPENED" -> opened(d, sessionId);
+            case "TRADE_FOUND" -> found(d);
             case "TRADE_CLOSED" -> closed(d, sessionId);
             case "SNAPSHOT" -> snapshot(d, sessionId);
             case "SCAN" -> live.setScan(d);
@@ -92,6 +93,18 @@ public class EventService {
         tx.setRemark(detail);
         txs.save(tx);
         push.notify("TRADE_OPENED", "Valid entry · " + t.getSymbol(), detail, "INFO");
+    }
+
+    private void found(Map<String, Object> d) {
+        String symbol = str(d.get("symbol"));
+        String side = str(d.get("side"));
+        String setup = str(d.get("setup"));
+        Double score = dbl(d.get("score"));
+        Double rr = dbl(d.get("rr"));
+        String body = String.format("%s %s · %s · score %.0f · R:R %s · entry %s  SL %s  TP %s",
+                side == null ? "" : side, symbol == null ? "" : symbol, setup == null ? "" : setup,
+                score == null ? 0 : score, rr == null ? "-" : rr, d.get("entry"), d.get("sl"), d.get("tp"));
+        push.notify("TRADE_FOUND", "Trade found · " + (symbol == null ? "" : symbol), body, "INFO");
     }
 
     private void closed(Map<String, Object> d, Long sessionId) {

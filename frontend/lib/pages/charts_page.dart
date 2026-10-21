@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:math' as math;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/api.dart';
@@ -16,6 +18,7 @@ class ChartsPage extends StatefulWidget {
 class _ChartsPageState extends State<ChartsPage> {
   static const symbols = ['XAUUSD', 'EURUSD', 'GBPUSD'];
   static const tfs = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'];
+  static const tfLabel = {'M1': '1m', 'M5': '5m', 'M15': '15m', 'M30': '30m', 'H1': '1H', 'H4': '4H', 'D1': 'D'};
   static const layerNames = {
     'ema': 'EMA 20/50/200',
     'bb': 'Bollinger',
@@ -33,7 +36,6 @@ class _ChartsPageState extends State<ChartsPage> {
   Map<String, dynamic>? _rank;
   String? _error;
   bool _loading = false;
-  Offset? _cursor;
   Timer? _timer;
 
   @override
@@ -77,61 +79,151 @@ class _ChartsPageState extends State<ChartsPage> {
     }
   }
 
+  void _pickSymbol(String s) {
+    if (s == _symbol) return;
+    setState(() => _symbol = s);
+    _load();
+  }
+
+  void _pickTf(String t) {
+    if (t == _tf) return;
+    setState(() => _tf = t);
+    _load();
+  }
+
+  void _openIndicators() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: context.cardColor2,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setSheet) {
+          return SafeArea(
+            child: ListView(shrinkWrap: true, children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text('Indicators', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: ctx.textColor)),
+              ),
+              for (final e in layerNames.entries)
+                InkWell(
+                  onTap: () {
+                    setState(() => _layers.contains(e.key) ? _layers.remove(e.key) : _layers.add(e.key));
+                    setSheet(() {});
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    child: Row(children: [
+                      SizedBox(
+                        width: 40,
+                        child: Icon(_layers.contains(e.key) ? Icons.check_rounded : null, color: Palette.brand, size: 18),
+                      ),
+                      Expanded(child: Text(e.value, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14))),
+                    ]),
+                  ),
+                ),
+              const SizedBox(height: 8),
+            ]),
+          );
+        });
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final data = _data;
-    return ListView(padding: const EdgeInsets.all(16), children: [
-      Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-        for (final s in symbols)
-          SelectChip(label: s, selected: _symbol == s, style: const TextStyle(fontWeight: FontWeight.w800), onSelected: () {
-            setState(() => _symbol = s);
-            _load();
-          }),
-        const SizedBox(width: 12),
-        for (final t in tfs)
-          SelectChip(label: t, selected: _tf == t, onSelected: () {
-            setState(() => _tf = t);
-            _load();
-          }),
-      ]),
-      const SizedBox(height: 12),
-      AppCard(
-        padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-        child: SizedBox(
-          height: MediaQuery.of(context).size.height * 0.55 < 380 ? 380 : MediaQuery.of(context).size.height * 0.55,
-          child: _error != null && data == null
-              ? Center(child: ErrorBanner(_error!, onRetry: _load))
-              : data == null
-                  ? const Center(child: CircularProgressIndicator(color: Palette.brand))
-                  : MouseRegion(
-                      onHover: (e) => setState(() => _cursor = e.localPosition),
-                      onExit: (_) => setState(() => _cursor = null),
-                      child: GestureDetector(
-                        onPanUpdate: (e) => setState(() => _cursor = e.localPosition),
-                        onPanEnd: (_) => setState(() => _cursor = null),
-                        onLongPressStart: (e) => setState(() => _cursor = e.localPosition),
-                        child: CustomPaint(size: Size.infinite, painter: CandlePainter(data, _layers, context.isDark, _cursor)),
-                      ),
-                    ),
-        ),
-      ),
-      const SizedBox(height: 12),
-      AppCard(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const SectionTitle('Overlays', subtitle: 'Toggle the analysis drawn on the chart'),
-          Wrap(spacing: 8, runSpacing: 4, children: [
-            for (final e in layerNames.entries)
-              SelectChip(
-                label: e.value,
-                selected: _layers.contains(e.key),
-                onSelected: () => setState(() => _layers.contains(e.key) ? _layers.remove(e.key) : _layers.add(e.key)),
+    final narrow = MediaQuery.sizeOf(context).width < 720;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(narrow ? 8 : 12, 8, narrow ? 8 : 12, 8),
+      child: Column(children: [
+        Expanded(
+          flex: narrow ? 8 : 7,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: context.isDark ? const Color(0xFF0E1424) : Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: context.borderColor),
+            ),
+            child: Column(children: [
+              _toolbar(context),
+              Divider(height: 1, color: context.borderColor),
+              Expanded(
+                child: _error != null && data == null
+                    ? Center(child: ErrorBanner(_error!, onRetry: _load))
+                    : data == null
+                        ? const Center(child: CircularProgressIndicator(color: Palette.brand))
+                        : _ChartBoard(key: ValueKey('$_symbol|$_tf'), data: data, layers: _layers, dark: context.isDark),
               ),
-          ]),
-        ]),
-      ),
-      const SizedBox(height: 12),
-      if (data != null) _analysisPanel(context, data),
-    ]);
+            ]),
+          ),
+        ),
+        if (data != null) ...[
+          const SizedBox(height: 8),
+          Expanded(flex: narrow ? 4 : 3, child: SingleChildScrollView(child: _analysisPanel(context, data))),
+        ],
+      ]),
+    );
+  }
+
+  Widget _toolbar(BuildContext context) {
+    return SizedBox(
+      height: 42,
+      child: Row(children: [
+        PopupMenuButton<String>(
+          tooltip: 'Symbol',
+          onSelected: _pickSymbol,
+          itemBuilder: (ctx) => [
+            for (final s in symbols)
+              PopupMenuItem(
+                value: s,
+                height: 40,
+                child: Row(children: [
+                  SizedBox(width: 22, child: _symbol == s ? const Icon(Icons.check_rounded, size: 16, color: Palette.brand) : null),
+                  Text(s, style: TextStyle(fontWeight: _symbol == s ? FontWeight.w800 : FontWeight.w600)),
+                ]),
+              ),
+          ],
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Text(_symbol, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+              Icon(Icons.arrow_drop_down_rounded, size: 20, color: context.muted),
+            ]),
+          ),
+        ),
+        Container(width: 1, height: 18, color: context.borderColor),
+        Expanded(
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            children: [
+              for (final t in tfs)
+                InkWell(
+                  onTap: () => _pickTf(t),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Container(
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(
+                      border: Border(bottom: BorderSide(color: _tf == t ? Palette.brand : Colors.transparent, width: 2)),
+                    ),
+                    child: Text(
+                      tfLabel[t]!,
+                      style: TextStyle(fontSize: 13, fontWeight: _tf == t ? FontWeight.w800 : FontWeight.w600, color: _tf == t ? Palette.brand : context.muted),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        IconButton(
+          tooltip: 'Indicators',
+          visualDensity: VisualDensity.compact,
+          onPressed: _openIndicators,
+          icon: Icon(Icons.functions_rounded, size: 20, color: context.textColor),
+        ),
+      ]),
+    );
   }
 
   Widget _analysisPanel(BuildContext context, Map<String, dynamic> data) {
@@ -187,4 +279,138 @@ class _ChartsPageState extends State<ChartsPage> {
           Flexible(child: Text(v, textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5))),
         ]),
       );
+}
+
+/// Drag to pan, pinch or scroll to zoom, drag the price scale to resize price.
+/// Opens on the fitted view and stays there until you move it.
+class _ChartBoard extends StatefulWidget {
+  final Map<String, dynamic> data;
+  final Set<String> layers;
+  final bool dark;
+  const _ChartBoard({super.key, required this.data, required this.layers, required this.dark});
+
+  @override
+  State<_ChartBoard> createState() => _ChartBoardState();
+}
+
+class _ChartBoardState extends State<_ChartBoard> {
+  bool _fitted = true;
+  double _start = -0.5;
+  double _span = 20;
+  double _priceZoom = 1;
+  double _priceShift = 0;
+  Offset? _cursor;
+  double _scale0 = 1;
+
+  int get _n => ((widget.data['candles'] as List?) ?? const []).length;
+
+  void _leaveFit() {
+    if (_fitted) {
+      _fitted = false;
+      _start = -0.5;
+      _span = _n + 2;
+    }
+  }
+
+  void _reset() => setState(() {
+        _fitted = true;
+        _priceZoom = 1;
+        _priceShift = 0;
+        _cursor = null;
+      });
+
+  void _clamp() {
+    final n = _n.toDouble();
+    _span = _span.clamp(8, math.max(8, n * 3));
+    final minStart = -_span * 0.2;
+    final maxStart = math.max(minStart, n - _span * 0.25);
+    _start = _start.clamp(minStart, maxStart);
+  }
+
+  void _zoom(double focalDx, double plotW, double factor) {
+    _leaveFit();
+    final count0 = _span;
+    final idx = _start + focalDx / (plotW / count0);
+    _span = (_span * factor).clamp(8, math.max(8, _n * 3));
+    _start = idx - focalDx / (plotW / _span);
+    _clamp();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (context, c) {
+      final plotW = math.max(1.0, c.maxWidth - CandlePainter.rightPad);
+      final timeAxis = c.maxHeight - CandlePainter.bottomPad;
+      return Listener(
+        onPointerSignal: (e) {
+          if (e is! PointerScrollEvent) return;
+          setState(() => _zoom(e.localPosition.dx.clamp(0, plotW), plotW, e.scrollDelta.dy > 0 ? 1.12 : 0.88));
+        },
+        child: GestureDetector(
+          onDoubleTap: _reset,
+          onLongPressStart: (e) => setState(() => _cursor = e.localPosition),
+          onLongPressMoveUpdate: (e) => setState(() => _cursor = e.localPosition),
+          onLongPressEnd: (_) => setState(() => _cursor = null),
+          onScaleStart: (e) => _scale0 = 1,
+          onScaleUpdate: (e) {
+            setState(() {
+              final local = e.localFocalPoint;
+              final onPrice = local.dx >= c.maxWidth - CandlePainter.rightPad;
+              final onTime = local.dy >= timeAxis;
+              if (e.pointerCount >= 2) {
+                final factor = _scale0 / e.scale;
+                if ((factor - 1).abs() > 0.001) _zoom(local.dx.clamp(0, plotW), plotW, factor);
+                _scale0 = e.scale;
+              } else if (onPrice) {
+                _priceZoom = (_priceZoom * (1 - e.focalPointDelta.dy / 220)).clamp(0.35, 8);
+                _priceShift = (_priceShift + e.focalPointDelta.dy / 500).clamp(-2, 2);
+              } else if (onTime) {
+                _leaveFit();
+                _span = (_span * (1 - e.focalPointDelta.dx / 280)).clamp(8, math.max(8, _n * 3));
+                _clamp();
+              } else {
+                _leaveFit();
+                _start -= e.focalPointDelta.dx / (plotW / _span);
+                _clamp();
+              }
+            });
+          },
+          child: MouseRegion(
+            onHover: (e) => setState(() => _cursor = e.localPosition),
+            onExit: (_) => setState(() => _cursor = null),
+            child: Stack(children: [
+              CustomPaint(
+                size: Size.infinite,
+                painter: CandlePainter(
+                  widget.data,
+                  widget.layers,
+                  widget.dark,
+                  _cursor,
+                  viewStart: _fitted ? null : _start,
+                  viewSpan: _fitted ? null : _span,
+                  priceZoom: _priceZoom,
+                  priceShift: _priceShift,
+                ),
+              ),
+              if (!_fitted || _priceZoom != 1 || _priceShift != 0)
+                Positioned(
+                  left: 6,
+                  bottom: 26,
+                  child: TextButton(
+                    onPressed: _reset,
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      foregroundColor: widget.dark ? const Color(0xFFCBD5E1) : const Color(0xFF334155),
+                      backgroundColor: (widget.dark ? Colors.black : Colors.white).withValues(alpha: 0.72),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    ),
+                    child: const Text('Reset', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                  ),
+                ),
+            ]),
+          ),
+        ),
+      );
+    });
+  }
 }

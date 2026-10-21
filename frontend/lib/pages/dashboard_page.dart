@@ -275,8 +275,6 @@ class _Hero extends StatelessWidget {
       child: LayoutBuilder(builder: (context, c) {
         final narrow = c.maxWidth < 700;
         final info = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const BrandLogo(height: 132),
-          const SizedBox(height: 16),
           Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
             StatusPill(status, color, pulse: running),
             if (engine['mode'] == 'paper') const Tag('PAPER MODE', Palette.gold),

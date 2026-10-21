@@ -96,9 +96,9 @@ class _ShellState extends State<Shell> {
       child: SafeArea(
         child: Column(children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 20, 16, 14),
+            padding: const EdgeInsets.fromLTRB(2, 16, 12, 12),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const BrandLogo(height: 64),
+              Transform.translate(offset: const Offset(-8, 0), child: const BrandLogo(height: 64)),
               const SizedBox(height: 8),
               Text('TRADING DESK', style: TextStyle(fontSize: 11, color: Palette.brand, fontWeight: FontWeight.w800, letterSpacing: 1.6)),
             ]),

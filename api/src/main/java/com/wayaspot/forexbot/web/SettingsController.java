@@ -77,6 +77,6 @@ public class SettingsController {
 
     @PostMapping("/test-email")
     public Map<String, Object> testEmail() {
-        return Map.of("sent", reports.sendTest());
+        return reports.sendTest();
     }
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -18,12 +19,54 @@ bool get _fcmPlatform {
   return defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS;
 }
 
+const _alertsChannel = AndroidNotificationChannel(
+  'joelmtrader_alerts',
+  'JoelMTrader alerts',
+  description: 'Entries, bot start and stop, and risk alerts',
+  importance: Importance.max,
+  playSound: true,
+  enableVibration: true,
+);
+
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   } catch (_) {}
+  final title = message.data['title'] ?? message.notification?.title ?? 'JoelMTrader';
+  final body = message.data['body'] ?? message.notification?.body ?? '';
+  final id = int.tryParse(message.data['id'] ?? '') ?? message.hashCode;
+  await showAndroidPush(id: id, title: title, body: body);
+}
+
+/// Draws the alert on the phone. Used when a push arrives and the app is closed or in the background.
+Future<void> showAndroidPush({required int id, required String title, required String body}) async {
+  if (defaultTargetPlatform != TargetPlatform.android) return;
+  final plugin = FlutterLocalNotificationsPlugin();
+  const init = AndroidInitializationSettings('@drawable/ic_stat_notify');
+  await plugin.initialize(settings: const InitializationSettings(android: init));
+  await plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()?.createNotificationChannel(_alertsChannel);
+  final details = AndroidNotificationDetails(
+    _alertsChannel.id,
+    _alertsChannel.name,
+    channelDescription: _alertsChannel.description,
+    importance: Importance.max,
+    priority: Priority.max,
+    icon: '@drawable/ic_stat_notify',
+    largeIcon: const DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
+    color: const Color(0xFF0000FF),
+    playSound: true,
+    enableVibration: true,
+    visibility: NotificationVisibility.public,
+    category: AndroidNotificationCategory.status,
+    ticker: title,
+    styleInformation: BigTextStyleInformation(body),
+  );
+  await plugin.show(id: id & 0x7fffffff, title: title, body: body, notificationDetails: NotificationDetails(android: details));
+  final prefs = await SharedPreferences.getInstance();
+  final last = prefs.getInt('pushLastId') ?? 0;
+  if (id > last) await prefs.setInt('pushLastId', id);
 }
 
 /// Shows system pop-ups on Android, iOS, Windows, and Linux, and keeps the in-app badge current.
@@ -81,23 +124,26 @@ class PushBridge {
     }
     if (defaultTargetPlatform == TargetPlatform.android) {
       final androidPlugin = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-      await androidPlugin?.createNotificationChannel(const AndroidNotificationChannel(
-        'joelmtrader_alerts',
-        'JoelMTrader alerts',
-        description: 'Entries, bot start and stop, and risk alerts',
-        importance: Importance.max,
-        playSound: true,
-        enableVibration: true,
-      ));
+      await androidPlugin?.createNotificationChannel(_alertsChannel);
       await androidPlugin?.requestNotificationsPermission();
+      await _askToRunUnrestricted();
     }
+  }
+
+  Future<void> _askToRunUnrestricted() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('batteryAsked') == true) return;
+    await prefs.setBool('batteryAsked', true);
+    try {
+      await const MethodChannel('joelmtrader/power').invokeMethod('requestUnrestricted');
+    } catch (_) {}
   }
 
   Future<void> _initFcm() async {
     if (!_fcmPlatform) return;
     try {
       await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
       final messaging = FirebaseMessaging.instance;
       await messaging.requestPermission(alert: true, badge: true, sound: true, criticalAlert: true);
       await messaging.setForegroundNotificationPresentationOptions(alert: true, badge: true, sound: true);
@@ -117,8 +163,8 @@ class PushBridge {
         final id = int.tryParse(message.data['id'] ?? '') ?? message.hashCode;
         unawaited(show(
           id: id,
-          title: message.notification?.title ?? 'JoelMTrader',
-          body: message.notification?.body ?? '',
+          title: message.data['title'] ?? message.notification?.title ?? 'JoelMTrader',
+          body: message.data['body'] ?? message.notification?.body ?? '',
         ));
       });
     } catch (e) {
@@ -190,6 +236,10 @@ class PushBridge {
     final details = NotificationDetails(android: android, iOS: darwin, macOS: darwin, windows: windows, linux: linux);
     try {
       await _local.show(id: id & 0x7fffffff, title: title, body: body, notificationDetails: details);
+      final prefs = await SharedPreferences.getInstance();
+      final last = prefs.getInt('pushLastId') ?? 0;
+      if (id > last) await prefs.setInt('pushLastId', id);
+      if (id > _lastShown) _lastShown = id;
     } catch (e) {
       debugPrint('Local notification failed: $e');
     }

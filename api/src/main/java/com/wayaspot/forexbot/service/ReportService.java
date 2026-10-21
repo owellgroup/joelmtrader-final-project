@@ -18,6 +18,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static com.wayaspot.forexbot.service.EmailTemplates.*;
 
@@ -142,10 +143,9 @@ public class ReportService {
         return true;
     }
 
-    public boolean sendTest() {
-        push.notify("TEST", "Test notification",
+    public Map<String, Object> sendTest() {
+        return push.notifyNow("TEST", "Test notification",
                 "Push alerts are on. Entries, starts, stops, and reports arrive here instead of e-mail.", "INFO");
-        return true;
     }
 
     private static String fmtDuration(Duration d) {

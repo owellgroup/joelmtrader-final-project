@@ -77,47 +77,84 @@ public class PushService {
         return notifications.markAllSeen();
     }
 
-    /** Saves the alert for the in-app center, then pushes it to every registered phone and desktop. */
+    /** Saves the alert for the in-app center, then pushes it to every registered phone. */
     public AppNotification notify(String type, String title, String body, String severity) {
+        AppNotification n = save(type, title, body, severity);
+        long id = n.getId();
+        schedule(() -> deliver(id));
+        return n;
+    }
+
+    /** Saves and pushes in this request, so the caller can see whether any phone was reached. */
+    public Map<String, Object> notifyNow(String type, String title, String body, String severity) {
+        AppNotification n = save(type, title, body, severity);
+        return deliver(n.getId());
+    }
+
+    private AppNotification save(String type, String title, String body, String severity) {
         AppNotification n = new AppNotification();
         n.setType(type == null ? "ALERT" : type);
         n.setTitle(title == null ? "JoelMTrader" : title);
         n.setBody(body == null ? "" : body);
         n.setSeverity(severity == null ? "INFO" : severity);
-        n = notifications.save(n);
-        long id = n.getId();
+        return notifications.save(n);
+    }
+
+    private void schedule(Runnable job) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    new Thread(() -> dispatch(id), "push-" + id).start();
+                    new Thread(job, "push").start();
                 }
             });
         } else {
-            new Thread(() -> dispatch(id), "push-" + id).start();
+            new Thread(job, "push").start();
         }
-        return n;
     }
 
-    public void dispatch(Long id) {
+    public Map<String, Object> deliver(Long id) {
+        Map<String, Object> out = new LinkedHashMap<>();
         AppNotification n = notifications.findById(id).orElse(null);
-        if (n == null) return;
+        out.put("saved", n != null);
+        if (n == null) {
+            out.put("sent", false);
+            out.put("error", "Notification was not saved");
+            return out;
+        }
         List<DeviceToken> targets = devices.findAll();
+        boolean configured = configured();
+        out.put("configured", configured);
+        out.put("devices", targets.size());
         if (targets.isEmpty()) {
-            log.info("Push '{}' saved. No devices registered yet.", n.getTitle());
-            return;
+            log.info("Push '{}' saved. No phone has registered yet.", n.getTitle());
+            out.put("sent", false);
+            out.put("delivered", 0);
+            out.put("error", "No phone is registered. Open the Android app once while signed in, allow notifications, then send the test again.");
+            return out;
         }
-        if (!configured()) {
+        if (!configured) {
             log.warn("Push '{}' saved, but FCM_PROJECT_ID / FCM_CLIENT_EMAIL / FCM_PRIVATE_KEY are not set.", n.getTitle());
-            return;
+            out.put("sent", false);
+            out.put("delivered", 0);
+            out.put("error", "Phone push is not configured on the server. The alert is saved and only appears when the app is opened.");
+            return out;
         }
+        int delivered = 0;
+        String error = null;
         for (DeviceToken device : targets) {
             try {
                 sendOne(device.getToken(), n);
+                delivered++;
             } catch (Exception e) {
+                error = e.getMessage();
                 log.warn("Push to {} failed: {}", device.getPlatform(), e.getMessage());
             }
         }
+        out.put("delivered", delivered);
+        out.put("sent", delivered > 0);
+        if (delivered == 0) out.put("error", error == null ? "Push was not accepted by Firebase" : error);
+        return out;
     }
 
     private boolean configured() {
@@ -132,24 +169,21 @@ public class PushService {
         String bearer = googleAccessToken();
         Map<String, Object> message = new LinkedHashMap<>();
         message.put("token", token);
-        message.put("notification", Map.of("title", n.getTitle(), "body", n.getBody()));
+        // Data-only on Android so the phone draws the alert itself, including when the app is closed.
+        // A display payload is often delayed or dropped until the app is opened on some Android phones.
         message.put("data", Map.of(
                 "id", String.valueOf(n.getId()),
-                "type", n.getType(),
-                "severity", n.getSeverity() == null ? "INFO" : n.getSeverity()));
+                "type", n.getType() == null ? "ALERT" : n.getType(),
+                "severity", n.getSeverity() == null ? "INFO" : n.getSeverity(),
+                "title", n.getTitle() == null ? "JoelMTrader" : n.getTitle(),
+                "body", n.getBody() == null ? "" : n.getBody()));
         message.put("android", Map.of(
                 "priority", "HIGH",
-                "notification", Map.of(
-                        "channel_id", "joelmtrader_alerts",
-                        "notification_priority", "PRIORITY_MAX",
-                        "visibility", "PUBLIC",
-                        "default_sound", true,
-                        "default_vibrate_timings", true,
-                        "icon", "ic_stat_notify",
-                        "color", "#0000FF")));
+                "ttl", "86400s"));
         message.put("apns", Map.of(
-                "headers", Map.of("apns-priority", "10"),
+                "headers", Map.of("apns-priority", "10", "apns-push-type", "alert"),
                 "payload", Map.of("aps", Map.of(
+                        "alert", Map.of("title", n.getTitle(), "body", n.getBody() == null ? "" : n.getBody()),
                         "sound", "default",
                         "interruption-level", "time-sensitive"))));
         String json = mapper.writeValueAsString(Map.of("message", message));

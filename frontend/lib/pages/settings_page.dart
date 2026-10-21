@@ -241,7 +241,14 @@ class _SettingsPageState extends State<SettingsPage> {
             Pressable(onPressed: () async {
               try {
                 final r = await api.post('/api/settings/test-email');
-                if (mounted) context.toast(r['sent'] == true ? 'Test push sent' : 'Push failed - check the FCM settings in .env', error: r['sent'] != true);
+                if (!mounted) return;
+                final sent = r is Map && r['sent'] == true;
+                final delivered = r is Map ? r['delivered'] : null;
+                final error = r is Map ? r['error']?.toString() : null;
+                final msg = sent
+                    ? 'Test push sent to $delivered phone${delivered == 1 ? '' : 's'}. It should pop up with the app closed.'
+                    : (error ?? 'Push failed. Check the FCM settings on the server.');
+                context.toast(msg, error: !sent);
               } on ApiException catch (e) {
                 if (mounted) context.toast(e.message, error: true);
               }

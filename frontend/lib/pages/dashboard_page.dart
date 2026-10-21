@@ -118,7 +118,7 @@ class _DashboardPageState extends State<DashboardPage> {
     var close = true;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => StatefulBuilder(
+      builder: (_) => SelectionArea(child: StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
           title: const Text('Stop trading?'),
           content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -137,7 +137,7 @@ class _DashboardPageState extends State<DashboardPage> {
             Pressable(onPressed: () => Navigator.pop(ctx, true), background: Palette.red, foreground: Colors.white, child: const Text('Stop trade')),
           ],
         ),
-      ),
+      )),
     );
     if (ok != true) return;
     setState(() => _busy = true);

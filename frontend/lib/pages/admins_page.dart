@@ -42,7 +42,7 @@ class _AdminsPageState extends State<AdminsPage> {
     var enabled = admin?['enabled'] != false;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => StatefulBuilder(
+      builder: (_) => SelectionArea(child: StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
           title: Text(isNew ? 'Add admin' : 'Edit admin'),
           content: SizedBox(
@@ -59,7 +59,7 @@ class _AdminsPageState extends State<AdminsPage> {
             Pressable(onPressed: () => Navigator.pop(ctx, true), background: Palette.brand, foreground: Colors.white, child: Text(isNew ? 'Create' : 'Save')),
           ],
         ),
-      ),
+      )),
     );
     if (ok != true) return;
     try {

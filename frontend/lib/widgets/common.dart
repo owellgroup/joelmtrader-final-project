@@ -227,7 +227,7 @@ class BrandLogo extends StatelessWidget {
     return SvgPicture.asset(
       'assets/images/logo.svg',
       height: height,
-      width: height * (2047 / 801),
+      width: height * (7500 / 3000),
       fit: BoxFit.contain,
       alignment: Alignment.centerLeft,
       clipBehavior: Clip.none,
@@ -441,7 +441,7 @@ class ResponsiveGrid extends StatelessWidget {
 Future<bool> confirmDialog(BuildContext context, String title, String message, {String confirm = 'Confirm', bool danger = false}) async {
   final r = await showDialog<bool>(
     context: context,
-    builder: (_) => AlertDialog(
+    builder: (_) => SelectionArea(child: AlertDialog(
       title: Text(title),
       content: Text(message),
       actions: [
@@ -453,7 +453,7 @@ Future<bool> confirmDialog(BuildContext context, String title, String message, {
           child: Text(confirm),
         ),
       ],
-    ),
+    )),
   );
   return r ?? false;
 }

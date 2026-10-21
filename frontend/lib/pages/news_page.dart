@@ -90,10 +90,10 @@ class _NewsPageState extends State<NewsPage> {
             const SectionTitle('Market headlines', subtitle: 'Filter by the pair you want to read'),
             Wrap(spacing: 8, runSpacing: 8, children: [
               for (final f in ['ALL', 'XAUUSD', 'EURUSD', 'GBPUSD'])
-                ChoiceChip(
-                  label: Text(f),
+                SelectChip(
+                  label: f,
                   selected: _filter == f,
-                  onSelected: (_) => setState(() => _filter = f),
+                  onSelected: () => setState(() => _filter = f),
                 ),
             ]),
             const SizedBox(height: 8),

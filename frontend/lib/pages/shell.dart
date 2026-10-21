@@ -229,12 +229,18 @@ class _NavTile extends StatelessWidget {
           color: selected ? Palette.brand.withOpacity(0.13) : Colors.transparent,
           borderRadius: BorderRadius.circular(14),
         ),
-        child: ListTile(
-          dense: true,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          leading: Icon(item.icon, color: selected ? Palette.brand : context.muted),
-          title: Text(item.label, style: TextStyle(fontWeight: selected ? FontWeight.w800 : FontWeight.w600, color: selected ? Palette.brand : context.textColor)),
-          onTap: onTap,
+        child: Pressable(
+          onPressed: onTap,
+          expand: true,
+          alignment: MainAxisAlignment.start,
+          background: selected ? Palette.brand.withValues(alpha: 0.13) : Colors.transparent,
+          foreground: selected ? Palette.brand : context.textColor,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          icon: Icon(item.icon, color: selected ? Palette.brand : context.muted),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(item.label, style: TextStyle(fontWeight: selected ? FontWeight.w800 : FontWeight.w600, color: selected ? Palette.brand : context.textColor)),
+          ),
         ),
       ),
     );

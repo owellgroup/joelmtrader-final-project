@@ -112,12 +112,12 @@ class _NotificationsPageState extends State<NotificationsPage> {
           const SizedBox(height: 14),
           Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
             for (final f in _filters)
-              ChoiceChip(
-                label: Text(f == 'ALL' ? 'All' : f[0] + f.substring(1).toLowerCase()),
+              SelectChip(
+                label: f == 'ALL' ? 'All' : f[0] + f.substring(1).toLowerCase(),
                 selected: _filter == f,
-                onSelected: (_) => setState(() => _filter = f),
+                onSelected: () => setState(() => _filter = f),
               ),
-            TextButton.icon(onPressed: _readAll, icon: const Icon(Icons.done_all_rounded, size: 18), label: const Text('Mark all read')),
+            Pressable(onPressed: _readAll, background: Colors.transparent, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), icon: const Icon(Icons.done_all_rounded, size: 18), child: const Text('Mark all read')),
           ]),
           const SizedBox(height: 14),
           if (visible.isEmpty)

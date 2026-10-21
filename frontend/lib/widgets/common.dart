@@ -26,7 +26,175 @@ class AppCard extends StatelessWidget {
       child: child,
     );
     if (onTap == null) return box;
-    return InkWell(borderRadius: BorderRadius.circular(20), onTap: onTap, child: box);
+    return Pressable(onPressed: onTap, padding: EdgeInsets.zero, background: Colors.transparent, borderRadius: BorderRadius.circular(20), child: box);
+  }
+}
+
+/// A clickable control whose label can still be dragged and copied.
+/// A short click runs [onPressed]. A drag selects the text instead.
+class Pressable extends StatefulWidget {
+  final VoidCallback? onPressed;
+  final Widget child;
+  final Widget? icon;
+  final Color? background;
+  final Color? foreground;
+  final BorderSide? side;
+  final EdgeInsetsGeometry padding;
+  final BorderRadius borderRadius;
+  final bool expand;
+  final double? minHeight;
+  final MainAxisAlignment alignment;
+
+  const Pressable({
+    super.key,
+    required this.onPressed,
+    required this.child,
+    this.icon,
+    this.background,
+    this.foreground,
+    this.side,
+    this.padding = const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+    this.borderRadius = const BorderRadius.all(Radius.circular(14)),
+    this.expand = false,
+    this.minHeight,
+    this.alignment = MainAxisAlignment.center,
+  });
+
+  @override
+  State<Pressable> createState() => _PressableState();
+}
+
+class _PressableState extends State<Pressable> {
+  Offset? _down;
+  bool _hover = false;
+  bool _pressed = false;
+
+  void _release(PointerEvent event) {
+    final start = _down;
+    setState(() {
+      _down = null;
+      _pressed = false;
+    });
+    if (widget.onPressed == null || start == null) return;
+    if ((event.position - start).distance > 8) return;
+    context.findAncestorStateOfType<SelectableRegionState>()?.clearSelection();
+    widget.onPressed!();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.onPressed != null;
+    final fg = widget.foreground ?? Palette.brand;
+    final bg = widget.background;
+    final hover = _hover && enabled;
+    final pressed = _pressed && enabled;
+    Color? fill = bg;
+    if (fill != null && fill.a > 0) {
+      if (pressed) fill = Color.alphaBlend(Colors.black.withValues(alpha: 0.12), fill);
+      else if (hover) fill = Color.alphaBlend(Colors.white.withValues(alpha: 0.08), fill);
+    } else if (hover) {
+      fill = Palette.brand.withValues(alpha: 0.08);
+    }
+    final row = widget.icon == null
+        ? widget.child
+        : Row(mainAxisSize: widget.expand ? MainAxisSize.max : MainAxisSize.min, mainAxisAlignment: widget.alignment, children: [
+            IconTheme.merge(data: IconThemeData(color: fg, size: 18), child: widget.icon!),
+            const SizedBox(width: 8),
+            if (widget.expand) Flexible(child: widget.child) else widget.child,
+          ]);
+    return MouseRegion(
+      cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() {
+        _hover = false;
+        _pressed = false;
+      }),
+      child: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: enabled
+            ? (e) => setState(() {
+                  _down = e.position;
+                  _pressed = true;
+                })
+            : null,
+        onPointerUp: enabled ? _release : null,
+        onPointerCancel: enabled
+            ? (_) => setState(() {
+                  _down = null;
+                  _pressed = false;
+                })
+            : null,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 120),
+          opacity: enabled ? 1 : 0.45,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            width: widget.expand ? double.infinity : null,
+            constraints: BoxConstraints(minHeight: widget.minHeight ?? 0),
+            alignment: Alignment.center,
+            padding: widget.padding,
+            decoration: BoxDecoration(
+              color: fill,
+              borderRadius: widget.borderRadius,
+              border: widget.side == null ? null : Border.fromBorderSide(widget.side!),
+            ),
+            child: DefaultTextStyle.merge(
+              style: TextStyle(color: fg, fontWeight: FontWeight.w600),
+              child: IconTheme.merge(data: IconThemeData(color: fg, size: 18), child: row),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class SelectChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onSelected;
+  final TextStyle? style;
+  const SelectChip({super.key, required this.label, required this.selected, required this.onSelected, this.style});
+
+  @override
+  Widget build(BuildContext context) {
+    return Pressable(
+      onPressed: onSelected,
+      background: selected ? Palette.brand.withValues(alpha: 0.14) : (context.isDark ? const Color(0xFF12182B) : Colors.white),
+      foreground: selected ? Palette.brand : context.textColor,
+      side: BorderSide(color: selected ? Palette.brand : context.borderColor),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      borderRadius: BorderRadius.circular(20),
+      child: Text(label, style: style ?? const TextStyle(fontWeight: FontWeight.w700)),
+    );
+  }
+}
+
+class ToggleLine extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final bool checkbox;
+  const ToggleLine({super.key, required this.title, required this.value, required this.onChanged, this.subtitle, this.checkbox = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final control = checkbox
+        ? Checkbox(value: value, onChanged: onChanged == null ? null : (v) => onChanged!(v ?? false))
+        : Switch(value: value, onChanged: onChanged);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+            if (subtitle != null) Padding(padding: const EdgeInsets.only(top: 2), child: Text(subtitle!, style: TextStyle(fontSize: 12.5, color: context.muted, height: 1.35))),
+          ]),
+        ),
+        control,
+      ]),
+    );
   }
 }
 
@@ -233,7 +401,7 @@ class ErrorBanner extends StatelessWidget {
         decoration: BoxDecoration(color: Palette.red.withOpacity(0.08), borderRadius: BorderRadius.circular(14), border: Border.all(color: Palette.red.withOpacity(0.3))),
         child: LayoutBuilder(builder: (context, c) {
           final text = Expanded(child: Text(message, style: const TextStyle(fontSize: 13, height: 1.35)));
-          final retry = onRetry == null ? null : TextButton(onPressed: onRetry, child: const Text('Retry'));
+          final retry = onRetry == null ? null : Pressable(onPressed: onRetry, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), background: Colors.transparent, child: const Text('Retry'));
           if (c.maxWidth < 420) {
             return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -277,10 +445,11 @@ Future<bool> confirmDialog(BuildContext context, String title, String message, {
       title: Text(title),
       content: Text(message),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-        FilledButton(
-          style: danger ? FilledButton.styleFrom(backgroundColor: Palette.red) : null,
+        Pressable(onPressed: () => Navigator.pop(context, false), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), background: Colors.transparent, child: const Text('Cancel')),
+        Pressable(
           onPressed: () => Navigator.pop(context, true),
+          background: danger ? Palette.red : Palette.brand,
+          foreground: Colors.white,
           child: Text(confirm),
         ),
       ],

@@ -132,7 +132,7 @@ class _OpenTabState extends State<_OpenTab> with AutomaticKeepAliveClientMixin {
             child: Text('Why: ${reasons.take(3).join(' · ')}', maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11.5, color: context.muted, height: 1.35)),
           ),
         const SizedBox(height: 10),
-        Align(alignment: Alignment.centerRight, child: OutlinedButton.icon(onPressed: () => _close(t), icon: const Icon(Icons.close_rounded, size: 18), label: const Text('Close trade'))),
+        Align(alignment: Alignment.centerRight, child: Pressable(onPressed: () => _close(t), background: Colors.transparent, side: const BorderSide(color: Palette.brand), icon: const Icon(Icons.close_rounded, size: 18), child: const Text('Close trade'))),
       ]),
     );
   }
@@ -210,7 +210,7 @@ class _ClosedTabState extends State<_ClosedTab> with AutomaticKeepAliveClientMix
         const SizedBox(height: 12),
         Wrap(spacing: 8, children: [
           for (final s in [null, 'XAUUSD', 'EURUSD', 'GBPUSD'])
-            ChoiceChip(label: Text(s ?? 'All pairs'), selected: _symbol == s, onSelected: (_) {
+            SelectChip(label: s ?? 'All pairs', selected: _symbol == s, onSelected: () {
               setState(() => _symbol = s);
               _reload();
             }),
@@ -219,7 +219,7 @@ class _ClosedTabState extends State<_ClosedTab> with AutomaticKeepAliveClientMix
         if (_error != null) ErrorBanner(_error!, onRetry: _reload),
         if (_items.isEmpty && !_loading && _error == null) const EmptyState(icon: Icons.inbox_rounded, title: 'No closed trades yet'),
         ResponsiveGrid(minTileWidth: 420, children: [for (final t in _items) _closedCard(context, Map<String, dynamic>.from(t))]),
-        if (_page < _totalPages) Padding(padding: const EdgeInsets.all(16), child: Center(child: _loading ? const CircularProgressIndicator(color: Palette.brand) : OutlinedButton(onPressed: _more, child: Text('Load more ($_total total)')))),
+        if (_page < _totalPages) Padding(padding: const EdgeInsets.all(16), child: Center(child: _loading ? const CircularProgressIndicator(color: Palette.brand) : Pressable(onPressed: _more, background: Colors.transparent, side: const BorderSide(color: Palette.brand), child: Text('Load more ($_total total)')))),
       ]),
     );
   }

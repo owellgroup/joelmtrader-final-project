@@ -56,13 +56,12 @@ class _WayaAppState extends State<WayaApp> {
       theme: buildTheme(Brightness.light),
       darkTheme: buildTheme(Brightness.dark),
       themeMode: s.themeMode,
-      home: SelectionArea(
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 400),
-          child: !s.ready
-              ? const Scaffold(body: Center(child: CircularProgressIndicator(color: Palette.brand)))
-              : (s.loggedIn ? const Shell(key: ValueKey('shell')) : const LoginPage(key: ValueKey('login'))),
-        ),
+      builder: (context, child) => SelectionArea(child: child ?? const SizedBox.shrink()),
+      home: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 400),
+        child: !s.ready
+            ? const Scaffold(body: Center(child: CircularProgressIndicator(color: Palette.brand)))
+            : (s.loggedIn ? const Shell(key: ValueKey('shell')) : const LoginPage(key: ValueKey('login'))),
       ),
     );
   }

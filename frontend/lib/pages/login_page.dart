@@ -144,24 +144,26 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                     ),
                     const SizedBox(height: 22),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 52,
-                      child: FilledButton(
-                        onPressed: _busy ? null : _login,
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 200),
-                          child: _busy
-                              ? const SizedBox(key: ValueKey('busy'), height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white))
-                              : const Text('Sign in', key: ValueKey('go'), style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, letterSpacing: 0.2)),
-                        ),
+                    Pressable(
+                      onPressed: _busy ? null : _login,
+                      background: Palette.brand,
+                      foreground: Colors.white,
+                      expand: true,
+                      minHeight: 52,
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 200),
+                        child: _busy
+                            ? const SizedBox(key: ValueKey('busy'), height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white))
+                            : const Text('Sign in', key: ValueKey('go'), style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, letterSpacing: 0.2)),
                       ),
                     ),
                     const SizedBox(height: 4),
-                    TextButton.icon(
+                    Pressable(
                       onPressed: () => setState(() => _showServer = !_showServer),
+                      background: Colors.transparent,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       icon: const Icon(Icons.settings_ethernet, size: 16),
-                      label: Text(_showServer ? 'Hide server settings' : 'Server settings'),
+                      child: Text(_showServer ? 'Hide server settings' : 'Server settings'),
                     ),
                     Text(
                       'After you sign in, link your MT5 account on the dashboard. You stay signed in until you log out.',

@@ -124,17 +124,17 @@ class _DashboardPageState extends State<DashboardPage> {
           content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('The bot will stop scanning and opening trades. A push notification will pop up on your devices.'),
             const SizedBox(height: 8),
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
+            ToggleLine(
+              checkbox: true,
               value: close,
-              onChanged: (v) => setS(() => close = v ?? true),
-              title: const Text('Close all open positions now'),
-              subtitle: const Text('If unchecked, open trades keep their SL/TP at the broker.'),
+              onChanged: (v) => setS(() => close = v),
+              title: 'Close all open positions now',
+              subtitle: 'If unchecked, open trades keep their SL/TP at the broker.',
             ),
           ]),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            FilledButton(style: FilledButton.styleFrom(backgroundColor: Palette.red), onPressed: () => Navigator.pop(ctx, true), child: const Text('Stop trade')),
+            Pressable(onPressed: () => Navigator.pop(ctx, false), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), background: Colors.transparent, child: const Text('Cancel')),
+            Pressable(onPressed: () => Navigator.pop(ctx, true), background: Palette.red, foreground: Colors.white, child: const Text('Stop trade')),
           ],
         ),
       ),
@@ -329,17 +329,14 @@ class _BigButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           elevation: enabled ? 4 : 0,
           shadowColor: color.withOpacity(0.5),
-          child: InkWell(
+          child: Pressable(
+            onPressed: enabled ? onTap : null,
+            background: color,
+            foreground: Colors.white,
             borderRadius: BorderRadius.circular(16),
-            onTap: enabled ? onTap : null,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
-              child: Row(mainAxisAlignment: MainAxisAlignment.center, mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min, children: [
-                busy ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white)) : Icon(icon, color: Colors.white, size: 24),
-                const SizedBox(width: 8),
-                Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 15)),
-              ]),
-            ),
+            expand: expand,
+            icon: busy ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white)) : Icon(icon, color: Colors.white, size: 24),
+            child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 15)),
           ),
         ),
       ),
@@ -709,10 +706,12 @@ class _Mt5LinkCardState extends State<_Mt5LinkCard> {
           ),
         ]),
         const SizedBox(height: 12),
-        FilledButton.icon(
+        Pressable(
           onPressed: (_busy || !superAdmin) ? null : _connect,
+          background: Palette.brand,
+          foreground: Colors.white,
           icon: _busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.link_rounded),
-          label: const Text('Connect MT5'),
+          child: const Text('Connect MT5'),
         ),
         if (!superAdmin) Padding(padding: const EdgeInsets.only(top: 6), child: Text('Only the super admin can link the broker account.', style: TextStyle(fontSize: 11.5, color: context.muted))),
       ]),

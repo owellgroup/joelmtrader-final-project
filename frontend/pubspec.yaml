@@ -28,3 +28,18 @@ flutter:
   assets:
     - assets/images/icon.svg
     - assets/images/logo.svg
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: fonts/Inter-Regular.ttf
+          weight: 400
+        - asset: fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: fonts/Inter-Bold.ttf
+          weight: 700
+        - asset: fonts/Inter-ExtraBold.ttf
+          weight: 800
+        - asset: fonts/Inter-Black.ttf
+          weight: 900

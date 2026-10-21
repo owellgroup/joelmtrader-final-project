@@ -74,7 +74,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
         const SectionTitle('Transaction ledger', subtitle: 'Every open, close and bot event with opening / closing balance'),
         Wrap(spacing: 8, children: [
           for (final e in types.entries)
-            ChoiceChip(label: Text(e.value), selected: _type == e.key, onSelected: (_) {
+            SelectChip(label: e.value, selected: _type == e.key, onSelected: () {
               setState(() => _type = e.key);
               _reload();
             }),
@@ -91,7 +91,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
             ],
           ]),
         ),
-        if (_page < _totalPages) Padding(padding: const EdgeInsets.all(16), child: Center(child: _loading ? const CircularProgressIndicator(color: Palette.brand) : OutlinedButton(onPressed: _more, child: const Text('Load more')))),
+        if (_page < _totalPages) Padding(padding: const EdgeInsets.all(16), child: Center(child: _loading ? const CircularProgressIndicator(color: Palette.brand) : Pressable(onPressed: _more, background: Colors.transparent, side: const BorderSide(color: Palette.brand), child: const Text('Load more')))),
       ]),
     );
   }

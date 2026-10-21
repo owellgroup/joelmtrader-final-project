@@ -55,15 +55,21 @@ class _ReportsPageState extends State<ReportsPage> {
             const SectionTitle('Session reports', subtitle: 'A push notification is sent whenever you press Stop trade'),
             LayoutBuilder(builder: (context, c) {
               final narrow = c.maxWidth < 520;
-              final daily = OutlinedButton.icon(
+              final daily = Pressable(
                 onPressed: () => _act(() => api.post('/api/reports/daily'), 'Daily digest requested (only sent if trades closed today)'),
+                background: Colors.transparent,
+                side: const BorderSide(color: Palette.brand),
+                expand: narrow,
                 icon: const Icon(Icons.today_rounded, size: 18),
-                label: const Text('Send daily digest'),
+                child: const Text('Send daily digest'),
               );
-              final test = OutlinedButton.icon(
+              final test = Pressable(
                 onPressed: () => _act(() => api.post('/api/settings/test-email'), 'Test push sent'),
+                background: Colors.transparent,
+                side: const BorderSide(color: Palette.brand),
+                expand: narrow,
                 icon: const Icon(Icons.notifications_active_rounded, size: 18),
-                label: const Text('Test push'),
+                child: const Text('Test push'),
               );
               if (narrow) {
                 return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -111,8 +117,10 @@ class _ReportsPageState extends State<ReportsPage> {
           Icon(s['emailSent'] == true ? Icons.notifications_active_rounded : Icons.notifications_off_rounded, size: 16, color: s['emailSent'] == true ? Palette.green : context.muted),
           Text(s['emailSent'] == true ? 'Push sent' : 'Not pushed', style: TextStyle(fontSize: 12.5, color: context.muted)),
           if (!running)
-            TextButton(
+            Pressable(
               onPressed: () => _act(() => api.post('/api/reports/sessions/${s['id']}/resend'), 'Push queued'),
+              background: Colors.transparent,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: const Text('Send push again'),
             ),
         ]),

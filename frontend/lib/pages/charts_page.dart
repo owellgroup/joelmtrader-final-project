@@ -83,13 +83,13 @@ class _ChartsPageState extends State<ChartsPage> {
     return ListView(padding: const EdgeInsets.all(16), children: [
       Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
         for (final s in symbols)
-          ChoiceChip(label: Text(s, style: const TextStyle(fontWeight: FontWeight.w800)), selected: _symbol == s, onSelected: (_) {
+          SelectChip(label: s, selected: _symbol == s, style: const TextStyle(fontWeight: FontWeight.w800), onSelected: () {
             setState(() => _symbol = s);
             _load();
           }),
         const SizedBox(width: 12),
         for (final t in tfs)
-          ChoiceChip(label: Text(t), selected: _tf == t, onSelected: (_) {
+          SelectChip(label: t, selected: _tf == t, onSelected: () {
             setState(() => _tf = t);
             _load();
           }),
@@ -121,10 +121,10 @@ class _ChartsPageState extends State<ChartsPage> {
           const SectionTitle('Overlays', subtitle: 'Toggle the analysis drawn on the chart'),
           Wrap(spacing: 8, runSpacing: 4, children: [
             for (final e in layerNames.entries)
-              FilterChip(
-                label: Text(e.value),
+              SelectChip(
+                label: e.value,
                 selected: _layers.contains(e.key),
-                onSelected: (v) => setState(() => v ? _layers.add(e.key) : _layers.remove(e.key)),
+                onSelected: () => setState(() => _layers.contains(e.key) ? _layers.remove(e.key) : _layers.add(e.key)),
               ),
           ]),
         ]),

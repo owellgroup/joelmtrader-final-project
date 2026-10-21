@@ -15,6 +15,7 @@ ThemeData buildTheme(Brightness b) {
 
   return ThemeData(
     useMaterial3: true,
+    fontFamily: 'Inter',
     colorScheme: scheme,
     brightness: b,
     scaffoldBackgroundColor: scheme.surface,

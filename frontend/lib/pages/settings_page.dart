@@ -171,8 +171,8 @@ class _SettingsPageState extends State<SettingsPage> {
           ]),
           const SizedBox(height: 14),
           Wrap(spacing: 10, runSpacing: 10, children: [
-            FilledButton.icon(onPressed: (_busyMt5 || !app.isSuper) ? null : _saveMt5, icon: _busyMt5 ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.link_rounded), label: const Text('Save & connect')),
-            OutlinedButton.icon(onPressed: _busyMt5 ? null : _reconnect, icon: const Icon(Icons.refresh_rounded), label: const Text('Reconnect')),
+            Pressable(onPressed: (_busyMt5 || !app.isSuper) ? null : _saveMt5, background: Palette.brand, foreground: Colors.white, icon: _busyMt5 ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.link_rounded), child: const Text('Save & connect')),
+            Pressable(onPressed: _busyMt5 ? null : _reconnect, background: Colors.transparent, side: const BorderSide(color: Palette.brand), icon: const Icon(Icons.refresh_rounded), child: const Text('Reconnect')),
           ]),
           const SizedBox(height: 8),
           Text('The password is stored encrypted (AES-256) on your server and only used to log the MT5 terminal in. Use your trading password, not the investor password. Start with a DEMO account.', style: TextStyle(fontSize: 11.5, color: context.muted, height: 1.4)),
@@ -199,22 +199,22 @@ class _SettingsPageState extends State<SettingsPage> {
             _slider('max_trade_minutes', 'Time stop (no follow-through)', 10, 180, divisions: 17, suffix: ' min'),
             _slider('trade_start_utc', 'Trading window start (UTC hour)', 0, 23, divisions: 23),
             _slider('trade_end_utc', 'Trading window end (UTC hour)', 1, 24, divisions: 23),
-            SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('Close trades before high-impact news'), value: _risk!['close_before_news'] == true, onChanged: (v) => setState(() => _risk!['close_before_news'] = v)),
+            ToggleLine(title: 'Close trades before high-impact news', value: _risk!['close_before_news'] == true, onChanged: (v) => setState(() => _risk!['close_before_news'] = v)),
             const SizedBox(height: 4),
             Wrap(spacing: 8, children: [
               for (final s in ['XAUUSD', 'EURUSD', 'GBPUSD'])
-                FilterChip(
-                  label: Text(s),
+                SelectChip(
+                  label: s,
                   selected: ((_risk!['allowed_symbols'] as List?) ?? []).contains(s),
-                  onSelected: (v) => setState(() {
+                  onSelected: () => setState(() {
                     final l = List<String>.from((_risk!['allowed_symbols'] as List?) ?? []);
-                    v ? l.add(s) : l.remove(s);
+                    ((_risk!['allowed_symbols'] as List?) ?? []).contains(s) ? l.remove(s) : l.add(s);
                     _risk!['allowed_symbols'] = l;
                   }),
                 ),
             ]),
             const SizedBox(height: 14),
-            FilledButton.icon(onPressed: (_busyRisk || !app.isSuper) ? null : _saveRisk, icon: const Icon(Icons.save_rounded), label: const Text('Save risk settings')),
+            Pressable(onPressed: (_busyRisk || !app.isSuper) ? null : _saveRisk, background: Palette.brand, foreground: Colors.white, icon: const Icon(Icons.save_rounded), child: const Text('Save risk settings')),
             if (!app.isSuper) Padding(padding: const EdgeInsets.only(top: 6), child: Text('Only the super admin can change these.', style: TextStyle(fontSize: 11.5, color: context.muted))),
           ],
         ]),
@@ -233,19 +233,19 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const SizedBox(height: 10),
           Wrap(spacing: 10, children: [
-            OutlinedButton(onPressed: () async {
+            Pressable(onPressed: () async {
               await app.setApiUrl(_url.text);
               if (mounted) context.toast('Server URL saved');
               _load();
-            }, child: const Text('Save URL')),
-            OutlinedButton.icon(onPressed: () async {
+            }, background: Colors.transparent, side: const BorderSide(color: Palette.brand), child: const Text('Save URL')),
+            Pressable(onPressed: () async {
               try {
                 final r = await api.post('/api/settings/test-email');
                 if (mounted) context.toast(r['sent'] == true ? 'Test push sent' : 'Push failed - check the FCM settings in .env', error: r['sent'] != true);
               } on ApiException catch (e) {
                 if (mounted) context.toast(e.message, error: true);
               }
-            }, icon: const Icon(Icons.notifications_active_rounded), label: const Text('Send test push')),
+            }, background: Colors.transparent, side: const BorderSide(color: Palette.brand), icon: const Icon(Icons.notifications_active_rounded), child: const Text('Send test push')),
           ]),
           const Divider(height: 30),
           LayoutBuilder(builder: (context, c) {
@@ -254,13 +254,15 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(width: 10),
               Expanded(child: Text('${app.user?['username']}  ·  ${app.isSuper ? 'Super admin' : 'Admin'}', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700))),
             ]);
-            final logout = FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: Palette.red),
+            final logout = Pressable(
+              background: Palette.red,
+              foreground: Colors.white,
+              expand: c.maxWidth < 480,
               onPressed: () async {
                 if (await confirmDialog(context, 'Log out?', 'You will need to sign in again on this device.', confirm: 'Log out')) app.logout();
               },
               icon: const Icon(Icons.logout_rounded),
-              label: const Text('Log out'),
+              child: const Text('Log out'),
             );
             if (c.maxWidth < 480) {
               return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [

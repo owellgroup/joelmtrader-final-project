@@ -168,15 +168,15 @@ public class PushService {
     private void sendOne(String token, AppNotification n) throws Exception {
         String bearer = googleAccessToken();
         Map<String, Object> message = new LinkedHashMap<>();
+        String title = n.getTitle() == null ? "JoelMTrader" : n.getTitle();
+        String body = n.getBody() == null ? "" : n.getBody();
         message.put("token", token);
-        // Data-only on Android so the phone draws the alert itself, including when the app is closed.
-        // A display payload is often delayed or dropped until the app is opened on some Android phones.
         message.put("data", Map.of(
                 "id", String.valueOf(n.getId()),
                 "type", n.getType() == null ? "ALERT" : n.getType(),
                 "severity", n.getSeverity() == null ? "INFO" : n.getSeverity(),
-                "title", n.getTitle() == null ? "JoelMTrader" : n.getTitle(),
-                "body", n.getBody() == null ? "" : n.getBody()));
+                "title", title,
+                "body", body));
         message.put("android", Map.of(
                 "priority", "HIGH",
                 "ttl", "86400s"));

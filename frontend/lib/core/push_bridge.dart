@@ -20,7 +20,7 @@ bool get _fcmPlatform {
 }
 
 const _alertsChannel = AndroidNotificationChannel(
-  'joelmtrader_alerts',
+  'joelmtrader_alerts_v2',
   'JoelMTrader alerts',
   description: 'Entries, bot start and stop, and risk alerts',
   importance: Importance.max,
@@ -88,6 +88,7 @@ class PushBridge {
     _timer?.cancel();
     _timer = null;
     _state = null;
+    unawaited(_watch(false));
   }
 
   Future<void> _boot() async {
@@ -100,8 +101,16 @@ class PushBridge {
     await _initLocal();
     await _initFcm();
     _ready = true;
+    await _watch(true);
     await _poll();
     _timer ??= Timer.periodic(const Duration(seconds: 4), (_) => _poll());
+  }
+
+  Future<void> _watch(bool on) async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      await const MethodChannel('joelmtrader/watch').invokeMethod(on ? 'start' : 'stop');
+    } catch (_) {}
   }
 
   Future<void> _initLocal() async {
@@ -176,6 +185,9 @@ class PushBridge {
     final state = _state;
     if (state == null || !state.loggedIn) return;
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final stored = prefs.getInt('pushLastId') ?? 0;
+      if (stored > _lastShown) _lastShown = stored;
       final raw = await state.api.get('/api/notifications');
       if (raw is! Map) return;
       final unread = raw['unread'];
@@ -212,7 +224,7 @@ class PushBridge {
   Future<void> show({required int id, required String title, required String body}) async {
     if (!_shown.add(id)) return;
     final android = AndroidNotificationDetails(
-      'joelmtrader_alerts',
+      'joelmtrader_alerts_v2',
       'JoelMTrader alerts',
       channelDescription: 'Entries, bot status, and risk alerts',
       importance: Importance.max,

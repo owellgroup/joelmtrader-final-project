@@ -11,6 +11,19 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "joelmtrader/watch").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start" -> {
+                    AlertWatchService.start(this)
+                    result.success(true)
+                }
+                "stop" -> {
+                    AlertWatchService.stop(this)
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "joelmtrader/power").setMethodCallHandler { call, result ->
             if (call.method != "requestUnrestricted") {
                 result.notImplemented()

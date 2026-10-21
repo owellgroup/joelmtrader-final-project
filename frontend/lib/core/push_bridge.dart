@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../firebase_options.dart';
 import 'app_state.dart';
+import 'windows_icon_path.dart' if (dart.library.io) 'windows_icon_path_io.dart';
 
 bool get _underTest => WidgetsBinding.instance.runtimeType.toString().contains('Test');
 
@@ -63,10 +64,11 @@ class PushBridge {
   Future<void> _initLocal() async {
     const android = AndroidInitializationSettings('@drawable/ic_stat_notify');
     const darwin = DarwinInitializationSettings(requestAlertPermission: true, requestBadgePermission: true, requestSoundPermission: true);
-    const windows = WindowsInitializationSettings(
+    final windows = WindowsInitializationSettings(
       appName: 'JoelMTrader',
       appUserModelId: 'WayaSpot.JoelMTrader',
       guid: 'c3a1e7b4-6d28-4f91-9a55-2b8e4d0c7f13',
+      iconPath: windowsNotificationIconPath(),
     );
     final linux = LinuxInitializationSettings(
       defaultActionName: 'Open',

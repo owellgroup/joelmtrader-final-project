@@ -52,7 +52,7 @@ END
 
 // Icon with lowest ID value placed first to ensure application icon
 // remains consistent on all systems.
-// Generated from assets/images/icon.svg.
+// Generated from assets/images/icon.svg for the window, taskbar, and notifications.
 IDI_APP_ICON            ICON                    "resources\\app_icon.ico"
 
 

@@ -227,7 +227,7 @@ class BrandLogo extends StatelessWidget {
     return SvgPicture.asset(
       'assets/images/logo.svg',
       height: height,
-      width: height * (7500 / 3000),
+      width: height * (7500 / 2700),
       fit: BoxFit.contain,
       alignment: Alignment.centerLeft,
       clipBehavior: Clip.none,

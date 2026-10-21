@@ -78,7 +78,16 @@ class PushBridge {
       await _local.initialize(settings: InitializationSettings(android: android, iOS: darwin, macOS: darwin, windows: windows, linux: const LinuxInitializationSettings(defaultActionName: 'Open')));
     }
     if (defaultTargetPlatform == TargetPlatform.android) {
-      await _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()?.requestNotificationsPermission();
+      final androidPlugin = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+      await androidPlugin?.createNotificationChannel(const AndroidNotificationChannel(
+        'joelmtrader_alerts',
+        'JoelMTrader alerts',
+        description: 'Entries, bot start and stop, and risk alerts',
+        importance: Importance.max,
+        playSound: true,
+        enableVibration: true,
+      ));
+      await androidPlugin?.requestNotificationsPermission();
     }
   }
 
@@ -97,6 +106,11 @@ class PushBridge {
       if (token != null && state != null) {
         await state.api.post('/api/devices', body: {'token': token, 'platform': defaultTargetPlatform.name});
       }
+      FirebaseMessaging.instance.onTokenRefresh.listen((next) {
+        final current = _state;
+        if (current == null || !current.loggedIn) return;
+        unawaited(current.api.post('/api/devices', body: {'token': next, 'platform': defaultTargetPlatform.name}));
+      });
       FirebaseMessaging.onMessage.listen((message) {
         final id = int.tryParse(message.data['id'] ?? '') ?? message.hashCode;
         unawaited(show(

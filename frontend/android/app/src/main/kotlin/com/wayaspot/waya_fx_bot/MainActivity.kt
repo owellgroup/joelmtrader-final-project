@@ -14,7 +14,8 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "joelmtrader/watch").setMethodCallHandler { call, result ->
             when (call.method) {
                 "start" -> {
-                    AlertWatchService.start(this)
+                    val args = call.arguments as? Map<*, *>
+                    AlertWatchService.start(this, args?.get("apiUrl") as? String, args?.get("token") as? String)
                     result.success(true)
                 }
                 "stop" -> {

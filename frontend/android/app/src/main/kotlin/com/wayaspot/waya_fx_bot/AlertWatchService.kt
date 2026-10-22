@@ -39,6 +39,11 @@ class AlertWatchService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val url = intent?.getStringExtra("apiUrl")
+        val token = intent?.getStringExtra("token")
+        if (!url.isNullOrBlank() && !token.isNullOrBlank()) {
+            getSharedPreferences(STORE, MODE_PRIVATE).edit().putString("apiUrl", url).putString("token", token).apply()
+        }
         createChannels()
         val notice = watchNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -60,9 +65,9 @@ class AlertWatchService : Service() {
     }
 
     private fun poll() {
-        val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
-        val base = prefs.getString("flutter.apiUrl", null)?.trimEnd('/') ?: return
-        val token = prefs.getString("flutter.token", null) ?: return
+        val prefs = getSharedPreferences(STORE, MODE_PRIVATE)
+        val base = prefs.getString("apiUrl", null)?.trimEnd('/') ?: return
+        val token = prefs.getString("token", null) ?: return
         if (token.isBlank()) return
         val conn = (URL("$base/api/notifications").openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
@@ -75,10 +80,10 @@ class AlertWatchService : Service() {
             if (conn.responseCode != 200) return
             val text = conn.inputStream.bufferedReader().readText()
             val items = JSONObject(text).optJSONArray("items") ?: return
-            if (!prefs.contains("flutter.pushLastId")) {
+            if (!prefs.contains("pushLastId")) {
                 var max = 0L
                 for (i in 0 until items.length()) max = maxOf(max, items.optJSONObject(i)?.optLong("id", 0) ?: 0)
-                prefs.edit().putLong("flutter.pushLastId", max).apply()
+                prefs.edit().putLong("pushLastId", max).apply()
                 return
             }
             var last = lastId(prefs)
@@ -94,14 +99,14 @@ class AlertWatchService : Service() {
                 nm.notify(id.toInt(), alert(title, body))
                 if (id > last) last = id
             }
-            if (fresh.isNotEmpty()) prefs.edit().putLong("flutter.pushLastId", last).apply()
+            if (fresh.isNotEmpty()) prefs.edit().putLong("pushLastId", last).apply()
         } finally {
             conn.disconnect()
         }
     }
 
     private fun lastId(prefs: android.content.SharedPreferences): Long {
-        return when (val v = prefs.all["flutter.pushLastId"]) {
+        return when (val v = prefs.all["pushLastId"]) {
             is Int -> v.toLong()
             is Long -> v
             else -> 0L
@@ -156,9 +161,14 @@ class AlertWatchService : Service() {
         private const val WATCH_ID = 0x4a4d5401
         private const val ALERTS = "joelmtrader_alerts_v2"
         private const val WATCH = "joelmtrader_watch"
+        private const val STORE = "joelmtrader_watch"
 
-        fun start(context: Context) {
-            ContextCompat.startForegroundService(context, Intent(context, AlertWatchService::class.java))
+        fun start(context: Context, apiUrl: String?, token: String?) {
+            val intent = Intent(context, AlertWatchService::class.java).apply {
+                putExtra("apiUrl", apiUrl)
+                putExtra("token", token)
+            }
+            ContextCompat.startForegroundService(context, intent)
         }
 
         fun stop(context: Context) {

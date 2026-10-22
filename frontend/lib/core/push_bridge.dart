@@ -109,7 +109,7 @@ class PushBridge {
   Future<void> _watch(bool on) async {
     if (defaultTargetPlatform != TargetPlatform.android) return;
     try {
-      await const MethodChannel('joelmtrader/watch').invokeMethod(on ? 'start' : 'stop');
+      await const MethodChannel('joelmtrader/watch').invokeMethod(on ? 'start' : 'stop', on ? {'apiUrl': _state?.api.baseUrl, 'token': _state?.api.token} : null);
     } catch (_) {}
   }
 

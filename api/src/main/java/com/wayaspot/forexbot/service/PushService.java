@@ -171,6 +171,9 @@ public class PushService {
         String title = n.getTitle() == null ? "JoelMTrader" : n.getTitle();
         String body = n.getBody() == null ? "" : n.getBody();
         message.put("token", token);
+        // A notification block is what Android shows itself while the app is closed.
+        // Data alone stays invisible until the app is opened and checks the server.
+        message.put("notification", Map.of("title", title, "body", body));
         message.put("data", Map.of(
                 "id", String.valueOf(n.getId()),
                 "type", n.getType() == null ? "ALERT" : n.getType(),
@@ -179,7 +182,15 @@ public class PushService {
                 "body", body));
         message.put("android", Map.of(
                 "priority", "HIGH",
-                "ttl", "86400s"));
+                "ttl", "86400s",
+                "notification", Map.of(
+                        "channel_id", "joelmtrader_alerts_v2",
+                        "notification_priority", "PRIORITY_MAX",
+                        "visibility", "PUBLIC",
+                        "default_sound", true,
+                        "default_vibrate_timings", true,
+                        "icon", "ic_stat_notify",
+                        "color", "#0000FF")));
         message.put("apns", Map.of(
                 "headers", Map.of("apns-priority", "10", "apns-push-type", "alert"),
                 "payload", Map.of("aps", Map.of(

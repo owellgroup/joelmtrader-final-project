@@ -34,6 +34,7 @@ class RemoteMetaTrader5:
                     return result
                 return _to_obj(result)
 
+            self._cache[name] = invoke
             return invoke
         self._cache[name] = info.get("value")
         return self._cache[name]

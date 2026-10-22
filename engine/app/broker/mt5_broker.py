@@ -293,7 +293,9 @@ class MT5Broker(Broker):
                    "price": t.bid if buy else t.ask, "deviation": 30, "magic": Settings.magic,
                    "comment": "ForexBot close", "type_time": m.ORDER_TIME_GTC, "type_filling": self._filling(p.symbol)}
             r = self._order_send(req)
-            ok = r is not None and r.retcode == m.TRADE_RETCODE_DONE
+            if r is None:
+                return dict(ok=False, price=None, msg=f"close order_send returned None: {m.last_error()}")
+            ok = r.retcode == m.TRADE_RETCODE_DONE
             return dict(ok=ok, price=getattr(r, "price", None), msg=getattr(r, "comment", "none"))
 
     def modify_sltp(self, ticket, sl, tp):
@@ -306,7 +308,9 @@ class MT5Broker(Broker):
             req = {"action": m.TRADE_ACTION_SLTP, "symbol": p.symbol, "position": int(ticket),
                    "sl": float(sl if sl is not None else p.sl), "tp": float(tp if tp is not None else p.tp)}
             r = self._order_send(req)
-            return dict(ok=r is not None and r.retcode == m.TRADE_RETCODE_DONE, msg=getattr(r, "comment", "none"))
+            if r is None:
+                return dict(ok=False, msg=f"modify order_send returned None: {m.last_error()}")
+            return dict(ok=r.retcode == m.TRADE_RETCODE_DONE, msg=getattr(r, "comment", "none"))
 
     def deal_summary(self, ticket):
         with self.lock:

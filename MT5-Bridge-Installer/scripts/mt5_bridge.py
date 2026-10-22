@@ -1,52 +1,45 @@
-"""Connects this PC's MetaTrader 5 out to the cloud engine.
+﻿"""Connects this PC's MetaTrader 5 out to the cloud engine.
 
 The server cannot open a port into a home network. This script dials the
 server instead, then answers MT5 calls on that connection.
 
 Leave MetaTrader 5 open and logged in, with Algo Trading green.
 Leave this process running.
+
+Order handling (the part that used to fail with
+    order_send returned None: (-2, 'Unnamed arguments not allowed')):
+  * The MetaTrader5 package only accepts order_send / order_check with the
+    request passed as KEYWORDS. A positional dict is rejected before the
+    terminal ever sees the order. Whatever the engine sends (dict, keywords,
+    request=), this bridge always calls the terminal with keywords.
+  * Request values are coerced to plain int / float / str.
+  * The symbol is mapped to this broker's own spelling (EURUSD, EURUSDm,
+    EURUSD.a, GOLD ...) if the exact name does not exist.
+  * If the broker refuses the filling mode, the other modes are tried.
 """
 import asyncio
 import inspect
 import json
 import os
+import sys
 from pathlib import Path
 
-import subprocess
-import sys
-from importlib import metadata
-
-
-def _ensure_numpy_1x():
-    """MetaTrader5 5.0.x is built against numpy 1.x. With numpy 2.x every order_send fails with
-    (-2, 'Unnamed arguments not allowed'), while reading prices still works. Downgrade before importing it."""
-    try:
-        major = int(metadata.version("numpy").split(".")[0])
-    except Exception:  # noqa: BLE001
-        return
-    if major < 2:
-        return
-    print("numpy 2.x found. MetaTrader5 cannot place orders with it. Installing numpy<2 ...")
-    exe = sys.executable
-    py = os.path.join(os.path.dirname(exe), "python.exe")
-    if os.path.exists(py):
-        exe = py
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    subprocess.run([exe, "-m", "pip", "install", "numpy>=1.26,<2"], check=False, creationflags=flags)
-
-
-_ensure_numpy_1x()
-
-import MetaTrader5 as mt5  # noqa: E402
-import numpy as np  # noqa: E402
-import websockets  # noqa: E402
-
-print(f"MetaTrader5 {getattr(mt5, '__version__', '?')}, numpy {np.__version__}")
-if int(np.__version__.split(".")[0]) >= 2:
-    print("WARNING: numpy 2.x is still installed. Orders will fail. Run: pip install \"numpy<2\"")
+import MetaTrader5 as mt5
+import numpy as np
+import websockets
 
 SERVER = os.environ.get("MT5_BRIDGE_URL", "ws://145.241.187.174:8088/mt5-bridge")
 DEFAULT_KEY = "a293bc338ba95dbd8bcfb55aa4ab99a13f51351f712d034c"
+
+print(f"MetaTrader5 {getattr(mt5, '__version__', '?')}, numpy {np.__version__}, python {sys.version.split()[0]}")
+
+INT_FIELDS = ("action", "magic", "order", "type", "type_filling", "type_time", "deviation",
+              "expiration", "position", "position_by")
+FLOAT_FIELDS = ("volume", "price", "stoplimit", "sl", "tp")
+STR_FIELDS = ("symbol", "comment")
+RETCODE_BAD_FILLING = 10030
+
+_last_error = {"value": None}
 
 
 def api_key():
@@ -82,25 +75,69 @@ def pack(obj):
     return str(obj)
 
 
-def dispatch(method, args, kwargs):
-    if method == "__lookup__":
-        obj = getattr(mt5, args[0])
-        return {"callable": callable(obj), "value": None if callable(obj) else pack(obj)}
-    fn = getattr(mt5, method)
-    if method in ("order_send", "order_check"):
-        request = args[0] if len(args) == 1 and isinstance(args[0], dict) else (kwargs if kwargs and not args else None)
-        if request is not None:
-            return pack(_send_request(fn, method, request))
-    return pack(fn(*args, **kwargs))
+# --------------------------------------------------------------------- order requests
+def _clean_request(request):
+    """Plain python types only; drop empty values the terminal does not want."""
+    out = {}
+    for key, value in request.items():
+        if value is None:
+            continue
+        if key in INT_FIELDS:
+            out[key] = int(value)
+        elif key in FLOAT_FIELDS:
+            out[key] = float(value)
+        elif key in STR_FIELDS:
+            out[key] = str(value)
+        else:
+            out[key] = value
+    return out
 
 
-def _send_request(fn, method, request):
-    """Different MetaTrader5 builds want the request as a dict, as keywords, or as request=dict.
-    Try each style until the terminal answers; print what failed so the cause is visible."""
-    styles = (("keywords", lambda: fn(**request)),
-              ("dict", lambda: fn(request)),
-              ("request=", lambda: fn(request=request)))
-    for label, call in styles:
+def _resolve_symbol(name):
+    """Return the symbol spelling this broker uses for `name`."""
+    if not name:
+        return name
+    try:
+        if mt5.symbol_info(name) is not None:
+            mt5.symbol_select(name, True)
+            return name
+        names = [s.name for s in (mt5.symbols_get() or [])]
+    except Exception:  # noqa: BLE001
+        return name
+    base = name.upper()
+    for suffix in ("M", ".A", ".PRO", ".R", ".ECN", "_", "#", "."):
+        if base.endswith(suffix) and len(base) > len(suffix) + 3:
+            base = base[: -len(suffix)]
+            break
+    alias = "GOLD" if base == "XAUUSD" else ("SILVER" if base == "XAGUSD" else None)
+    for stem in (base, alias):
+        if not stem:
+            continue
+        exact = [s for s in names if s.upper() == stem]
+        near = sorted((s for s in names if s.upper().startswith(stem)), key=len)
+        pick = (exact or near or [None])[0]
+        if pick:
+            mt5.symbol_select(pick, True)
+            print(f"Symbol {name} mapped to {pick}")
+            return pick
+    return name
+
+
+def _fill_candidates(first):
+    modes = [first]
+    for mode in (mt5.ORDER_FILLING_IOC, mt5.ORDER_FILLING_FOK, mt5.ORDER_FILLING_RETURN):
+        if mode not in modes:
+            modes.append(mode)
+    return modes
+
+
+def _call_terminal(fn, method, request):
+    """MetaTrader5 wants keywords. Older builds wanted a dict. Try keywords first,
+    and only fall back when the terminal says the call style itself is wrong."""
+    first_error = None
+    for label, call in (("keywords", lambda: fn(**request)),
+                        ("dict", lambda: fn(request)),
+                        ("request=", lambda: fn(request=request))):
         try:
             result = call()
         except TypeError as e:
@@ -108,10 +145,51 @@ def _send_request(fn, method, request):
             continue
         if result is not None:
             return result
-        print(f"{method} style '{label}' returned None, last_error={mt5.last_error()}")
-    print(f"{method} failed in every call style. MetaTrader5 {getattr(mt5, '__version__', '?')}, "
-          f"numpy {np.__version__}, python {sys.version.split()[0]}. Request: {request}")
+        err = mt5.last_error()
+        if first_error is None:
+            first_error = err
+        if err and err[0] != -2:       # a real failure, not a call-style problem: do not mask it
+            break
+        print(f"{method} style '{label}' returned None, last_error={err}")
+    _last_error["value"] = first_error or mt5.last_error()
+    print(f"{method} failed. last_error={_last_error['value']} Request: {request}")
     return None
+
+
+def _send_request(fn, method, request):
+    request = _clean_request(request)
+    if "symbol" in request:
+        request["symbol"] = _resolve_symbol(request["symbol"])
+    result = _call_terminal(fn, method, request)
+    if result is not None and getattr(result, "retcode", None) == RETCODE_BAD_FILLING and "type_filling" in request:
+        for mode in _fill_candidates(request["type_filling"])[1:]:
+            retry = _call_terminal(fn, method, dict(request, type_filling=mode))
+            if retry is not None and retry.retcode != RETCODE_BAD_FILLING:
+                print(f"{method}: broker accepted filling mode {mode}")
+                return retry
+    return result
+
+
+def dispatch(method, args, kwargs):
+    if method == "__lookup__":
+        obj = getattr(mt5, args[0])
+        return {"callable": callable(obj), "value": None if callable(obj) else pack(obj)}
+    if method == "last_error" and _last_error["value"] is not None:
+        err, _last_error["value"] = _last_error["value"], None
+        return pack(err)
+    fn = getattr(mt5, method)
+    if method in ("order_send", "order_check"):
+        request = None
+        if len(args) == 1 and isinstance(args[0], dict):
+            request = args[0]
+        elif not args and isinstance(kwargs.get("request"), dict):
+            request = kwargs["request"]
+        elif kwargs and not args:
+            request = kwargs
+        if request is not None:
+            _last_error["value"] = None
+            return pack(_send_request(fn, method, request))
+    return pack(fn(*args, **kwargs))
 
 
 async def serve():

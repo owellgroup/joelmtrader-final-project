@@ -29,6 +29,7 @@ public class AdminController {
         this.users = users;
         this.encoder = encoder;
     }
+    //
 
     @GetMapping
     public List<Map<String, Object>> list() {

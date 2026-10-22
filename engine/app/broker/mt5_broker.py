@@ -19,6 +19,20 @@ log = logging.getLogger("mt5")
 DEAL_REASONS = {0: "CLIENT", 1: "MOBILE", 2: "WEB", 3: "EXPERT", 4: "SL", 5: "TP", 6: "SO"}
 
 
+def _plain(value):
+    """MetaTrader5 rejects numpy scalars inside an order request."""
+    if isinstance(value, bool) or value is None or isinstance(value, str):
+        return value
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        return float(value)
+    item = getattr(value, "item", None)
+    if callable(item):
+        return _plain(item())
+    return value
+
+
 class MT5Broker(Broker):
     name = "mt5"
 
@@ -235,6 +249,17 @@ class MT5Broker(Broker):
             return m.ORDER_FILLING_FOK
         return m.ORDER_FILLING_RETURN
 
+    def _order_send(self, req):
+        # Wheel 5.0.5735+ made order_send keyword-only. A positional dict
+        # returns None and last_error (-2, 'Unnamed arguments not allowed')
+        # before the terminal sees the order. Older wheels accept only the dict.
+        m = self.mt5
+        clean = {key: _plain(value) for key, value in req.items()}
+        try:
+            return m.order_send(**clean)
+        except TypeError:
+            return m.order_send(clean)
+
     def send_market(self, symbol, side, volume, sl, tp, comment=""):
         with self.lock:
             m = self.mt5
@@ -248,7 +273,7 @@ class MT5Broker(Broker):
                    "sl": float(sl or 0), "tp": float(tp or 0), "deviation": 20, "magic": Settings.magic,
                    "comment": (comment or "ForexBot")[:30], "type_time": m.ORDER_TIME_GTC,
                    "type_filling": self._filling(name)}
-            r = m.order_send(req)
+            r = self._order_send(req)
             if r is None:
                 return dict(ok=False, msg=f"order_send returned None: {m.last_error()}")
             ok = r.retcode == m.TRADE_RETCODE_DONE
@@ -267,7 +292,7 @@ class MT5Broker(Broker):
                    "type": m.ORDER_TYPE_SELL if buy else m.ORDER_TYPE_BUY, "position": int(ticket),
                    "price": t.bid if buy else t.ask, "deviation": 30, "magic": Settings.magic,
                    "comment": "ForexBot close", "type_time": m.ORDER_TIME_GTC, "type_filling": self._filling(p.symbol)}
-            r = m.order_send(req)
+            r = self._order_send(req)
             ok = r is not None and r.retcode == m.TRADE_RETCODE_DONE
             return dict(ok=ok, price=getattr(r, "price", None), msg=getattr(r, "comment", "none"))
 
@@ -280,7 +305,7 @@ class MT5Broker(Broker):
             p = pos[0]
             req = {"action": m.TRADE_ACTION_SLTP, "symbol": p.symbol, "position": int(ticket),
                    "sl": float(sl if sl is not None else p.sl), "tp": float(tp if tp is not None else p.tp)}
-            r = m.order_send(req)
+            r = self._order_send(req)
             return dict(ok=r is not None and r.retcode == m.TRADE_RETCODE_DONE, msg=getattr(r, "comment", "none"))
 
     def deal_summary(self, ticket):

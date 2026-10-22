@@ -58,6 +58,13 @@ def dispatch(method, args, kwargs):
         obj = getattr(mt5, args[0])
         return {"callable": callable(obj), "value": None if callable(obj) else pack(obj)}
     fn = getattr(mt5, method)
+    # order_send/order_check on MetaTrader5 5.0.5735+ are keyword-only.
+    # A positional request dict fails with (-2, 'Unnamed arguments not allowed').
+    if method in ("order_send", "order_check") and len(args) == 1 and isinstance(args[0], dict) and not kwargs:
+        try:
+            return pack(fn(**args[0]))
+        except TypeError:
+            return pack(fn(*args))
     return pack(fn(*args, **kwargs))
 
 

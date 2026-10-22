@@ -190,6 +190,8 @@ class _SettingsPageState extends State<SettingsPage> {
             _slider('micro_max_risk_pct', 'Micro-account hard cap per trade', 2, 15, divisions: 13, suffix: '%', help: 'With tiny balances the broker minimum lot can exceed your risk %. The bot only takes it if risk stays below this cap - otherwise it skips.'),
             _slider('max_total_open_risk_pct', 'Max total open risk', 2, 20, divisions: 18, suffix: '%'),
             _slider('max_positions', 'Max simultaneous positions', 1, 6, divisions: 5),
+            _slider('max_same_usd_direction', 'Max trades betting the same way on USD', 1, 3, divisions: 2, help: 'Gold, EURUSD and GBPUSD all move against the dollar.'),
+            _slider('max_same_jpy_direction', 'Max trades betting the same way on JPY', 1, 2, divisions: 1, help: 'GBPJPY and EURJPY are closely correlated.'),
             _slider('daily_loss_limit_pct', 'Daily loss limit (pauses until next day)', 2, 20, divisions: 18, suffix: '%'),
             _slider('max_drawdown_pct', 'Max drawdown kill-switch', 5, 50, divisions: 45, suffix: '%'),
             _slider('max_consecutive_losses', 'Losses in a row before cooldown', 1, 6, divisions: 5),
@@ -202,7 +204,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ToggleLine(title: 'Close trades before high-impact news', value: _risk!['close_before_news'] == true, onChanged: (v) => setState(() => _risk!['close_before_news'] = v)),
             const SizedBox(height: 4),
             Wrap(spacing: 8, children: [
-              for (final s in ['XAUUSD', 'EURUSD', 'GBPUSD'])
+              for (final s in ['XAUUSD', 'GBPJPY', 'EURJPY', 'EURUSD', 'GBPUSD'])
                 SelectChip(
                   label: s,
                   selected: ((_risk!['allowed_symbols'] as List?) ?? []).contains(s),

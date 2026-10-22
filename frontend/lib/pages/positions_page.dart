@@ -209,7 +209,7 @@ class _ClosedTabState extends State<_ClosedTab> with AutomaticKeepAliveClientMix
           ]),
         const SizedBox(height: 12),
         Wrap(spacing: 8, children: [
-          for (final s in [null, 'XAUUSD', 'EURUSD', 'GBPUSD'])
+          for (final s in [null, 'XAUUSD', 'GBPJPY', 'EURJPY', 'EURUSD', 'GBPUSD'])
             SelectChip(label: s ?? 'All pairs', selected: _symbol == s, onSelected: () {
               setState(() => _symbol = s);
               _reload();

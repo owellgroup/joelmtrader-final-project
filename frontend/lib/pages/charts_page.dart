@@ -16,7 +16,7 @@ class ChartsPage extends StatefulWidget {
 }
 
 class _ChartsPageState extends State<ChartsPage> {
-  static const symbols = ['XAUUSD', 'EURUSD', 'GBPUSD'];
+  static const symbols = ['XAUUSD', 'GBPJPY', 'EURJPY', 'EURUSD', 'GBPUSD'];
   static const tfs = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'];
   static const tfLabel = {'M1': '1m', 'M5': '5m', 'M15': '15m', 'M30': '30m', 'H1': '1H', 'H4': '4H', 'D1': 'D'};
   static const layerNames = {
@@ -30,7 +30,7 @@ class _ChartsPageState extends State<ChartsPage> {
     'swings': 'Swings',
     'plan': 'Entry / SL / TP',
   };
-  String _symbol = 'EURUSD', _tf = 'M5';
+  String _symbol = 'XAUUSD', _tf = 'M5';
   final Set<String> _layers = {'ema', 'zones', 'trend', 'ob', 'plan', 'swings'};
   Map<String, dynamic>? _data;
   Map<String, dynamic>? _rank;

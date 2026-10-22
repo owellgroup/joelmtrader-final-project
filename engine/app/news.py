@@ -10,10 +10,14 @@ import requests
 log = logging.getLogger("news")
 CALENDAR_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 FEEDS = ["https://www.fxstreet.com/rss/news", "https://www.forexlive.com/feed/news"]
-RELEVANT = {"XAUUSD": ["USD"], "EURUSD": ["USD", "EUR"], "GBPUSD": ["USD", "GBP"]}
+RELEVANT = {"XAUUSD": ["USD"], "EURUSD": ["USD", "EUR"], "GBPUSD": ["USD", "GBP"],
+            "GBPJPY": ["GBP", "JPY"], "EURJPY": ["EUR", "JPY"]}
+WATCHED = {"USD", "EUR", "GBP", "JPY"}
 KEYWORDS = {"XAUUSD": ["gold", "xau", "bullion", "fed", "dollar", "treasury", "inflation", "cpi", "nfp", "powell"],
             "EURUSD": ["eur", "euro", "ecb", "dollar", "fed", "eurozone", "lagarde"],
-            "GBPUSD": ["gbp", "pound", "sterling", "boe", "bank of england", "dollar", "fed", "uk "]}
+            "GBPUSD": ["gbp", "pound", "sterling", "boe", "bank of england", "dollar", "fed", "uk "],
+            "GBPJPY": ["gbp", "pound", "sterling", "boe", "bank of england", "jpy", "yen", "boj", "bank of japan", "ueda", "japan"],
+            "EURJPY": ["eur", "euro", "ecb", "lagarde", "eurozone", "jpy", "yen", "boj", "bank of japan", "ueda", "japan"]}
 
 
 class News:
@@ -78,7 +82,7 @@ class News:
         self._kick()
         now = time.time()
         return [e for e in self._events if now - hours_back * 3600 <= e["time"] <= now + hours_ahead * 3600
-                and e["impact"] in ("High", "Medium") and e["currency"] in ("USD", "EUR", "GBP")]
+                and e["impact"] in ("High", "Medium") and e["currency"] in WATCHED]
 
     def headlines(self, limit=30):
         self._kick()

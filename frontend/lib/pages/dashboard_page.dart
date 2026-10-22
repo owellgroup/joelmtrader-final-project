@@ -241,7 +241,7 @@ class _Hero extends StatelessWidget {
     switch (status) {
       case 'SCANNING':
         headline = 'Scanning the markets';
-        sub = 'Ranking XAUUSD, EURUSD and GBPUSD and waiting for a high-quality entry.';
+        sub = 'Checking XAUUSD, GBPJPY and EURJPY first, then EURUSD and GBPUSD, and waiting for a high-quality entry.';
         break;
       case 'IN_TRADE':
         headline = 'Managing open trades';
@@ -358,7 +358,7 @@ class _RankingCard extends StatelessWidget {
     final chosen = scan?['chosen']?.toString();
     return AppCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const SectionTitle('Opportunity ranking', subtitle: 'All 3 pairs scored across D1 · H4 · H1 · M30 · M15 · M5 · M1'),
+        const SectionTitle('Opportunity ranking', subtitle: 'All 5 symbols scored (gold, GBPJPY, EURJPY first) across D1 · H4 · H1 · M30 · M15 · M5 · M1'),
         if (ranks.isEmpty)
           const EmptyState(icon: Icons.radar_rounded, title: 'Waiting for market data', message: 'Connect your MT5 account in Settings (or use paper mode).')
         else ...[
@@ -409,6 +409,7 @@ class _RankRow extends StatelessWidget {
           title: Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
             Text(r['symbol'].toString(), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
             Tag(r['side'].toString(), buy ? Palette.green : Palette.red),
+            if (r['priority'] == true) const Tag('PRIORITY', Palette.gold),
             if (selected) const Tag('SELECTED', Palette.brand),
             Text(score.toStringAsFixed(0), style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20, color: barColor)),
           ]),
@@ -447,6 +448,14 @@ class _RankRow extends StatelessWidget {
                   Text('Entry ${r['plan']['entry']}  ·  SL ${r['plan']['sl']}  ·  TP ${r['plan']['tp']}  ·  lots ${r['lots']}  ·  risk ${money(r['riskAmount'])}',
                       style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
                 if (d(r['riskPctAtMinLot']) > 0) Text('Risk at minimum lot: ${pct(r['riskPctAtMinLot'])} of equity', style: TextStyle(fontSize: 11.5, color: context.muted)),
+                if (r['affordability'] is Map)
+                  Text(
+                    r['affordability']['affordable'] == true
+                        ? 'Affordable: smallest lot risks ${money(r['affordability']['minLotRisk'])} (cap ${money(r['affordability']['riskCap'])})'
+                        : 'Not affordable yet: smallest lot risks ${money(r['affordability']['minLotRisk'])}, cap ${money(r['affordability']['riskCap'])}. Needs about ${money(r['affordability']['balanceNeeded'])} equity.',
+                    style: TextStyle(fontSize: 11.5, color: r['affordability']['affordable'] == true ? context.muted : Palette.red),
+                  ),
+                if (r['accountFix'] != null) _bullet(context, r['accountFix'].toString(), Palette.brand, Icons.build_rounded),
                 const SizedBox(height: 8),
                 for (final x in (r['reasons'] as List? ?? [])) _bullet(context, x.toString(), Palette.green, Icons.check_rounded),
                 for (final x in (r['penalties'] as List? ?? [])) _bullet(context, x.toString(), Palette.gold, Icons.remove_rounded),

@@ -58,6 +58,16 @@ class AlertWatchService : Service() {
         return START_STICKY
     }
 
+    /**
+     * Android 15+ lets a "data sync" foreground service run about 6 hours a day, then calls this.
+     * The service must stop here or the system crashes the app. Push (FCM) keeps delivering alerts after that.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        ticking = false
+        handler.removeCallbacks(tick)
+        stopSelf()
+    }
+
     override fun onDestroy() {
         ticking = false
         handler.removeCallbacks(tick)

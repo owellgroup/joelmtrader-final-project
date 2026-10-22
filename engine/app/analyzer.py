@@ -3,7 +3,8 @@ import math
 import numpy as np
 
 from . import structure as st
-from .risk import risk_pct_at_min_lot, size_position
+from .config import PRIORITY_SYMBOLS
+from .risk import risk_pct_at_min_lot, size_position, loss_per_lot
 
 HTF_W = {"D1": 0.15, "H4": 0.25, "H1": 0.25, "M30": 0.15, "M15": 0.20}
 ABBR = {1: "bullish", -1: "bearish"}
@@ -28,7 +29,7 @@ def tf_summary(fr):
             "macd_hist": float(r.macd_hist), "bb_width": f(r.bb_bw, 4)}
 
 
-def build_plan(d, tick, info, atr5, f5, zones, cfg):
+def build_plan(d, tick, info, atr5, f5, zones, cfg, tight=False):
     spread = tick["ask"] - tick["bid"]
     entry = tick["ask"] if d == 1 else tick["bid"]
     mid = (tick["ask"] + tick["bid"]) / 2
@@ -40,7 +41,7 @@ def build_plan(d, tick, info, atr5, f5, zones, cfg):
     else:
         struct_dist = 1.5 * atr5
     min_dist = max(0.8 * atr5, 4 * spread, info.get("stops_level", 0) * info["point"] * 1.3)
-    sl_dist = clip(struct_dist, min_dist, 2.0 * atr5)
+    sl_dist = min_dist if tight else clip(struct_dist, min_dist, 2.0 * atr5)
     tp_dist, note = 2.0 * sl_dist, "2R default target"
     opp = [z for z in zones if (z["kind"] == "resistance" if d == 1 else z["kind"] == "support")
            and (z["strength"] >= 4.5 or z["touches"] >= 3)]          # only meaningful zones cap the target
@@ -212,6 +213,18 @@ def analyze_symbol(symbol, frames, tick, info, zones, cfg, perf, equity, news):
     total, comp, why, pen, setup, d = best
 
     plan = build_plan(d, tick, info, atr5, f5, zones, cfg)
+    account_fix = None
+    if symbol in PRIORITY_SYMBOLS:
+        # Priority symbol that the account cannot afford with the normal stop: try the tightest allowed
+        # stop (0.8 x ATR, never below the broker/spread minimum) so the minimum lot fits the risk cap.
+        _, _, unaffordable = size_position(equity, plan["sl_dist"], info, cfg)
+        if unaffordable:
+            tight = build_plan(d, tick, info, atr5, f5, zones, cfg, tight=True)
+            _, _, still = size_position(equity, tight["sl_dist"], info, cfg)
+            if not still and tight["sl_dist"] < plan["sl_dist"]:
+                plan = tight
+                account_fix = "Small-account fix: stop tightened to the minimum so the smallest lot fits the risk cap"
+                why.append(account_fix)
     if plan["zone_block"]:
         total -= 8
         pen.append(f"Opposing S/R zone only {plan['tp_dist'] / plan['sl_dist']:.1f}R away (-8)")
@@ -233,6 +246,7 @@ def analyze_symbol(symbol, frames, tick, info, zones, cfg, perf, equity, news):
     if total < cfg.min_score: blocked_reasons.append(f"Score {total:.0f} < {cfg.min_score:.0f}")
     if plan["rr"] < cfg.min_rr: blocked_reasons.append(f"R:R {plan['rr']:.2f} < {cfg.min_rr}")
     lots, risk_amt, why_not = size_position(equity, plan["sl_dist"], info, cfg)
+    min_lot_risk = info["volume_min"] * loss_per_lot(plan["sl_dist"], info)
     if why_not: blocked_reasons.append("Unaffordable: " + why_not)
     if symbol not in cfg.allowed_symbols: blocked_reasons.append("Symbol disabled in settings")
     if spread_ratio <= cfg.max_spread_to_sl:
@@ -247,6 +261,10 @@ def analyze_symbol(symbol, frames, tick, info, zones, cfg, perf, equity, news):
         "rr": round(plan["rr"], 2), "lots": lots, "riskAmount": round(risk_amt, 2),
         "riskPctAtMinLot": round(risk_pct_at_min_lot(equity, plan["sl_dist"], info), 2),
         "components": {k: round(v, 1) for k, v in comp.items()}, "reasons": why, "penalties": pen,
+        "priority": symbol in PRIORITY_SYMBOLS, "accountFix": account_fix,
+        "affordability": {"affordable": not why_not, "minLotRisk": round(min_lot_risk, 2),
+                          "riskCap": round(equity * cfg.micro_max_risk_pct / 100, 2),
+                          "balanceNeeded": round(min_lot_risk / max(cfg.micro_max_risk_pct, 1e-9) * 100, 2)},
         "tradable": len(blocked_reasons) == 0, "blockedReasons": blocked_reasons,
         "timeframes": {tf: tf_summary(fr) for tf, fr in frames.items()},
     }

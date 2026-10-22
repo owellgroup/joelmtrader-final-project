@@ -30,5 +30,22 @@ def size_position(equity: float, sl_dist: float, info: dict, cfg):
     return 0.0, min_risk, f"min lot would risk ${min_risk:.2f} ({min_risk / equity * 100:.1f}% > {cfg.micro_max_risk_pct}% cap)"
 
 
+def size_within_budget(equity: float, sl_dist: float, info: dict, cfg, budget: float):
+    """Like size_position, but never risks more than `budget` dollars (the risk room still free
+    after the trades that are already open). The lot size is scaled down to fit when possible.
+    Returns (lots, risk_amount, reject_reason)."""
+    lots, risk, why = size_position(equity, sl_dist, info, cfg)
+    if lots <= 0:
+        return lots, risk, why
+    if risk <= budget + 1e-9:
+        return lots, risk, ""
+    per_lot = loss_per_lot(sl_dist, info)
+    fit = round_volume(max(budget, 0.0) / per_lot, info)
+    if fit >= info["volume_min"]:
+        return fit, fit * per_lot, ""
+    min_risk = info["volume_min"] * per_lot
+    return 0.0, min_risk, f"not enough risk room: ${max(budget, 0.0):.2f} left, minimum lot needs ${min_risk:.2f}"
+
+
 def risk_pct_at_min_lot(equity: float, sl_dist: float, info: dict) -> float:
     return info["volume_min"] * loss_per_lot(sl_dist, info) / max(equity, 1e-9) * 100

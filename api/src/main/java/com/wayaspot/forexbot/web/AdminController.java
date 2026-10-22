@@ -18,7 +18,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/admins")
 @PreAuthorize("hasRole('SUPER_ADMIN')")
-public class AdminController {
+public class  AdminController {
     public record CreateRequest(@NotBlank String username, @NotBlank @Size(min = 8, message = "must be at least 8 characters") String password) { }
     public record UpdateRequest(String username, String password, Boolean enabled) { }
 

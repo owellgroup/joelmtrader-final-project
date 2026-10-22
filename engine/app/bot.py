@@ -9,8 +9,8 @@ from datetime import datetime, timezone
 
 from . import structure as st
 from .analyzer import analyze_symbol
-from .config import SYMBOLS, DATA_DIR, Settings
-from .risk import size_position
+from .config import SYMBOLS, PRIORITY_SYMBOLS, USD_QUOTED, JPY_CROSSES, DATA_DIR, Settings
+from .risk import size_within_budget
 
 log = logging.getLogger("bot")
 
@@ -59,6 +59,7 @@ class Bot:
         self.day_key, self.day_start_balance = None, 0
         self.tracked, self.close_reason, self.sym_cooldown = {}, {}, {}
         self.last_entry = 0
+        self._skip_logged = {}
         self.scan_data, self.last_scan_ts, self.last_scan_push, self.last_snapshot = None, 0, 0, 0
         self._found_key, self._found_at = None, 0
         self.activity = deque(maxlen=60)
@@ -202,7 +203,9 @@ class Bot:
                 ranks.append(analyze_symbol(s, frames, tick, info, zones, cfg, self.perf, equity, self.news))
             except Exception as e:              # noqa: BLE001
                 log.warning("scan %s failed: %s", s, e, exc_info=True)
-        ranks.sort(key=lambda r: -r["rankScore"])
+        # Priority symbols (gold, GBPJPY, EURJPY) always come first; the others only after them.
+        ranks.sort(key=lambda r: (0 if r["symbol"] in PRIORITY_SYMBOLS else 1, -r["rankScore"]))
+        self._check_priority_affordability(ranks, equity)
         chosen = next((r for r in ranks if r["tradable"]), None)
         if chosen:
             why = f"{chosen['symbol']} {chosen['side']} selected - score {chosen['score']:.0f}, R:R {chosen['rr']}, setup {chosen['setup']}. " + "; ".join(chosen["reasons"][:4])
@@ -218,6 +221,32 @@ class Bot:
         if time.time() - self.last_scan_push > 15:
             self.last_scan_push = time.time()
             self.rep.emit("SCAN", self.scan_data, self.session_id)
+
+    def _check_priority_affordability(self, ranks, equity):
+        """Every scan: does the balance allow a trade on each priority symbol? If not, say exactly why."""
+        if not self.enabled:
+            return
+        for r in ranks:
+            a = r.get("affordability") or {}
+            if r.get("priority") and not a.get("affordable", True):
+                self._skip_note(r["symbol"], (
+                    f"cannot be afforded yet - the smallest lot risks ${a['minLotRisk']:.2f} but the cap on a "
+                    f"${equity:.2f} account is ${a['riskCap']:.2f}. It qualifies at about ${a['balanceNeeded']:.0f} equity "
+                    f"with the current stop."))
+
+    @staticmethod
+    def _usd_dir(symbol, side):
+        """+1 = long USD, -1 = short USD, 0 = no USD exposure."""
+        if symbol not in USD_QUOTED:
+            return 0
+        return -1 if side == "BUY" else 1
+
+    @staticmethod
+    def _jpy_dir(symbol, side):
+        """+1 = long JPY, -1 = short JPY, 0 = no JPY exposure."""
+        if symbol not in JPY_CROSSES:
+            return 0
+        return -1 if side == "BUY" else 1
 
     def _news_state(self):
         out = {}
@@ -265,23 +294,33 @@ class Bot:
                 return
         if not (cfg.trade_start_utc <= self._utc().hour < cfg.trade_end_utc):
             return
-        open_syms = {m["symbol"] for m in self.tracked.values()}
-        total_risk = sum(m["risk_amount"] for m in self.tracked.values())
+        # Work like a human: best entry first, then the next best, each one sized to the risk room
+        # that is still free. A candidate that cannot be afforded is skipped, not forced.
+        acct = dict(acct)                           # local copy: free margin shrinks as we open trades
+        budget_total = acct["equity"] * cfg.max_total_open_risk_pct / 100
         for cand in self.scan_data["rankings"]:
-            if not cand["tradable"] or cand["symbol"] in open_syms:
+            if len(self.tracked) >= cfg.max_positions:
+                break
+            if not cand["tradable"] or cand["symbol"] in {m["symbol"] for m in self.tracked.values()}:
                 continue
             if self.sym_cooldown.get(cand["symbol"], 0) > now:
                 continue
-            usd_dir = -cand["direction"]            # buying EUR/GBP/XAU = short USD
-            same = sum(1 for m in self.tracked.values() if -(1 if m["side"] == "BUY" else -1) == usd_dir)
-            if same >= cfg.max_same_usd_direction:
+            usd = self._usd_dir(cand["symbol"], cand["side"])      # buying EUR/GBP/XAU = short USD
+            if usd and sum(1 for m in self.tracked.values() if self._usd_dir(m["symbol"], m["side"]) == usd) >= cfg.max_same_usd_direction:
                 continue
-            if total_risk + cand["riskAmount"] > acct["equity"] * cfg.max_total_open_risk_pct / 100:
+            jpy = self._jpy_dir(cand["symbol"], cand["side"])      # buying GBPJPY/EURJPY = short JPY
+            if jpy and sum(1 for m in self.tracked.values() if self._jpy_dir(m["symbol"], m["side"]) == jpy) >= cfg.max_same_jpy_direction:
                 continue
-            if self._execute(cand, acct, now):
-                return
+            room = budget_total - sum(m["risk_amount"] for m in self.tracked.values())
+            self._execute(cand, acct, now, room)
 
-    def _execute(self, cand, acct, now):
+    def _skip_note(self, symbol, text):
+        """Explain a skipped entry in the activity log, at most once a minute per symbol."""
+        if time.time() - self._skip_logged.get(symbol, 0) > 60:
+            self._skip_logged[symbol] = time.time()
+            self.log_event(f"{symbol}: skipped - {text}")
+
+    def _execute(self, cand, acct, now, risk_room):
         s, d, plan = cand["symbol"], cand["direction"], cand["plan"]
         info = self.info(s)
         tick = self.broker.tick(s)
@@ -295,11 +334,13 @@ class Bot:
             self.sym_cooldown[s] = now + 15
             self.last_scan_ts = 0                    # force a fresh plan on the next loop
             return False
-        lots, risk_amt, why_not = size_position(acct["equity"], sl_dist, info, self.cfg)
+        lots, risk_amt, why_not = size_within_budget(acct["equity"], sl_dist, info, self.cfg, risk_room)
         if lots <= 0:
+            self._skip_note(s, why_not or "cannot size the position")
             return False
-        if self.broker.margin_required(s, cand["side"], lots) > acct["free_margin"] * 0.6:
-            self.log_event(f"{s}: skipped - not enough free margin for {lots} lots")
+        margin = self.broker.margin_required(s, cand["side"], lots)
+        if margin > acct["free_margin"] * 0.6:
+            self._skip_note(s, f"not enough free margin for {lots} lots")
             return False
         nd = info["digits"]
         sl, tp = round(entry - d * sl_dist, nd), round(entry + d * tp_dist, nd)
@@ -310,6 +351,7 @@ class Bot:
             self.sym_cooldown[s] = now + 120
             return False
         ticket = res["ticket"]
+        acct["free_margin"] = acct["free_margin"] - margin
         meta = dict(symbol=s, side=cand["side"], entry=res["price"], sl0=sl, risk_dist=sl_dist, open_ts=now,
                     setup=cand["setup"], score=cand["score"], risk_amount=risk_amt, lots=lots, be_done=False,
                     balance_before=acct["balance"], miss=0)

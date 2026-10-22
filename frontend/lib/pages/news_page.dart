@@ -89,7 +89,7 @@ class _NewsPageState extends State<NewsPage> {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const SectionTitle('Market headlines', subtitle: 'Filter by the pair you want to read'),
             Wrap(spacing: 8, runSpacing: 8, children: [
-              for (final f in ['ALL', 'XAUUSD', 'EURUSD', 'GBPUSD'])
+              for (final f in ['ALL', 'XAUUSD', 'GBPJPY', 'EURJPY', 'EURUSD', 'GBPUSD'])
                 SelectChip(
                   label: f,
                   selected: _filter == f,

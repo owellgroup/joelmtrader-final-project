@@ -11,6 +11,9 @@ SPECS = {
     "XAUUSD": dict(base=3300.0, digits=2, contract=100.0, spread=0.25, sigma=0.00020),
     "EURUSD": dict(base=1.0850, digits=5, contract=100000.0, spread=0.00010, sigma=0.000045),
     "GBPUSD": dict(base=1.2900, digits=5, contract=100000.0, spread=0.00014, sigma=0.000055),
+    # JPY-quoted: profit is in yen, so `fx` converts yen to USD (about 1 / USDJPY)
+    "GBPJPY": dict(base=195.0, digits=3, contract=100000.0, spread=0.025, sigma=0.000060, fx=1 / 150.0),
+    "EURJPY": dict(base=163.0, digits=3, contract=100000.0, spread=0.020, sigma=0.000055, fx=1 / 150.0),
 }
 RULE = {"M1": "1min", "M5": "5min", "M15": "15min", "M30": "30min", "H1": "1h", "H4": "4h", "D1": "1D"}
 HISTORY_DAYS = 90
@@ -114,7 +117,7 @@ class PaperBroker(Broker):
         sp = SPECS[symbol]
         point = 10 ** -sp["digits"]
         return dict(symbol=symbol, digits=sp["digits"], point=point, tick_size=point,
-                    tick_value=sp["contract"] * point, contract_size=sp["contract"],
+                    tick_value=sp["contract"] * point * sp.get("fx", 1.0), contract_size=sp["contract"],
                     volume_min=0.01, volume_max=100.0, volume_step=0.01, stops_level=10)
 
     def tick(self, symbol):
@@ -142,7 +145,8 @@ class PaperBroker(Broker):
             cur = t["bid"] if p["side"] == "BUY" else t["ask"]
             sgn = 1 if p["side"] == "BUY" else -1
             p["price_current"] = cur
-            p["profit"] = (cur - p["price_open"]) * sgn * SPECS[p["symbol"]]["contract"] * p["volume"]
+            sp = SPECS[p["symbol"]]
+            p["profit"] = (cur - p["price_open"]) * sgn * sp["contract"] * p["volume"] * sp.get("fx", 1.0)
 
     def positions(self):
         with self.lock:
@@ -150,8 +154,8 @@ class PaperBroker(Broker):
             return [dict(p) for p in self.positions_d.values()]
 
     def margin_required(self, symbol, side, volume):
-        return SPECS[symbol]["contract"] * volume * self.price[symbol] / self.leverage if symbol != "XAUUSD" \
-            else SPECS[symbol]["contract"] * volume * self.price[symbol] / self.leverage
+        sp = SPECS[symbol]
+        return sp["contract"] * volume * self.price[symbol] * sp.get("fx", 1.0) / self.leverage
 
     def send_market(self, symbol, side, volume, sl, tp, comment=""):
         with self.lock:
@@ -170,7 +174,8 @@ class PaperBroker(Broker):
     def _close(self, ticket, price, reason):
         p = self.positions_d.pop(ticket)
         sgn = 1 if p["side"] == "BUY" else -1
-        gross = (price - p["price_open"]) * sgn * SPECS[p["symbol"]]["contract"] * p["volume"]
+        sp = SPECS[p["symbol"]]
+        gross = (price - p["price_open"]) * sgn * sp["contract"] * p["volume"] * sp.get("fx", 1.0)
         comm = -Settings.paper_commission_per_lot * p["volume"]
         self.balance += gross + comm
         self.closed[ticket] = dict(close_price=price, profit=gross, commission=comm, swap=0.0,

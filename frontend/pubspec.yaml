@@ -1,5 +1,5 @@
 name: waya_fx_bot
-description: JoelMTrader - control panel for the automated XAUUSD / EURUSD / GBPUSD trader.
+description: JoelMTrader - control panel for the automated XAUUSD / GBPJPY / EURJPY / EURUSD / GBPUSD trader.
 publish_to: 'none'
 version: 1.0.0+1
 

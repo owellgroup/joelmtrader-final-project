@@ -47,6 +47,25 @@ public class PushService {
         this.mapper = mapper;
     }
 
+    @jakarta.annotation.PostConstruct
+    void logConfiguration() {
+        if (configured()) {
+            log.info("Phone push (FCM) is configured for project {}.", props.getFcmProjectId().trim());
+        } else {
+            log.warn("Phone push (FCM) is NOT configured. Set FCM_PROJECT_ID, FCM_CLIENT_EMAIL and FCM_PRIVATE_KEY, "
+                    + "otherwise alerts only appear when the app is open.");
+        }
+    }
+
+    /** What the Android app needs for alerts while it is closed: server credentials and a registered phone. */
+    public Map<String, Object> status() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("configured", configured());
+        m.put("projectId", notBlank(props.getFcmProjectId()) ? props.getFcmProjectId().trim() : null);
+        m.put("devices", devices.count());
+        return m;
+    }
+
     @Transactional
     public DeviceToken register(String token, String platform) {
         DeviceToken row = devices.findByToken(token).orElseGet(DeviceToken::new);
@@ -208,7 +227,7 @@ public class PushService {
         HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
         if (res.statusCode() == 404 || res.statusCode() == 400 && res.body() != null && res.body().contains("UNREGISTERED")) {
             devices.findByToken(token).ifPresent(devices::delete);
-            return;
+            throw new IllegalStateException("A phone token had expired and was removed. Open the Android app once while signed in to register again.");
         }
         if (res.statusCode() >= 300) {
             throw new IllegalStateException("FCM " + res.statusCode() + " " + res.body());

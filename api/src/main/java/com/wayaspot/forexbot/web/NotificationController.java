@@ -24,6 +24,11 @@ public class NotificationController {
         return m;
     }
 
+    @GetMapping("/api/notifications/push-status")
+    public Map<String, Object> pushStatus() {
+        return push.status();
+    }
+
     @PostMapping("/api/notifications/{id}/read")
     public Map<String, Object> read(@PathVariable Long id) {
         push.markSeen(id);

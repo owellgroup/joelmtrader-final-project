@@ -12,7 +12,7 @@ import time
 import numpy as np
 import pandas as pd
 
-from ..config import Settings
+from ..config import SYMBOLS, Settings
 from .base import Broker
 
 log = logging.getLogger("mt5")
@@ -103,7 +103,7 @@ class MT5Broker(Broker):
     def _resolve_symbols(self):
         m = self.mt5
         all_syms = [s.name for s in (m.symbols_get() or [])]
-        for canon in ("XAUUSD", "EURUSD", "GBPUSD"):
+        for canon in SYMBOLS:
             cand = canon + Settings.symbol_suffix
             if cand in all_syms:
                 name = cand

@@ -12,9 +12,38 @@ import json
 import os
 from pathlib import Path
 
-import MetaTrader5 as mt5
-import numpy as np
-import websockets
+import subprocess
+import sys
+from importlib import metadata
+
+
+def _ensure_numpy_1x():
+    """MetaTrader5 5.0.x is built against numpy 1.x. With numpy 2.x every order_send fails with
+    (-2, 'Unnamed arguments not allowed'), while reading prices still works. Downgrade before importing it."""
+    try:
+        major = int(metadata.version("numpy").split(".")[0])
+    except Exception:  # noqa: BLE001
+        return
+    if major < 2:
+        return
+    print("numpy 2.x found. MetaTrader5 cannot place orders with it. Installing numpy<2 ...")
+    exe = sys.executable
+    py = os.path.join(os.path.dirname(exe), "python.exe")
+    if os.path.exists(py):
+        exe = py
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    subprocess.run([exe, "-m", "pip", "install", "numpy>=1.26,<2"], check=False, creationflags=flags)
+
+
+_ensure_numpy_1x()
+
+import MetaTrader5 as mt5  # noqa: E402
+import numpy as np  # noqa: E402
+import websockets  # noqa: E402
+
+print(f"MetaTrader5 {getattr(mt5, '__version__', '?')}, numpy {np.__version__}")
+if int(np.__version__.split(".")[0]) >= 2:
+    print("WARNING: numpy 2.x is still installed. Orders will fail. Run: pip install \"numpy<2\"")
 
 SERVER = os.environ.get("MT5_BRIDGE_URL", "ws://145.241.187.174:8088/mt5-bridge")
 DEFAULT_KEY = "a293bc338ba95dbd8bcfb55aa4ab99a13f51351f712d034c"
@@ -58,14 +87,31 @@ def dispatch(method, args, kwargs):
         obj = getattr(mt5, args[0])
         return {"callable": callable(obj), "value": None if callable(obj) else pack(obj)}
     fn = getattr(mt5, method)
-    # order_send/order_check on MetaTrader5 5.0.5735+ are keyword-only.
-    # A positional request dict fails with (-2, 'Unnamed arguments not allowed').
-    if method in ("order_send", "order_check") and len(args) == 1 and isinstance(args[0], dict) and not kwargs:
-        try:
-            return pack(fn(**args[0]))
-        except TypeError:
-            return pack(fn(*args))
+    if method in ("order_send", "order_check"):
+        request = args[0] if len(args) == 1 and isinstance(args[0], dict) else (kwargs if kwargs and not args else None)
+        if request is not None:
+            return pack(_send_request(fn, method, request))
     return pack(fn(*args, **kwargs))
+
+
+def _send_request(fn, method, request):
+    """Different MetaTrader5 builds want the request as a dict, as keywords, or as request=dict.
+    Try each style until the terminal answers; print what failed so the cause is visible."""
+    styles = (("keywords", lambda: fn(**request)),
+              ("dict", lambda: fn(request)),
+              ("request=", lambda: fn(request=request)))
+    for label, call in styles:
+        try:
+            result = call()
+        except TypeError as e:
+            print(f"{method} style '{label}' not accepted: {e}")
+            continue
+        if result is not None:
+            return result
+        print(f"{method} style '{label}' returned None, last_error={mt5.last_error()}")
+    print(f"{method} failed in every call style. MetaTrader5 {getattr(mt5, '__version__', '?')}, "
+          f"numpy {np.__version__}, python {sys.version.split()[0]}. Request: {request}")
+    return None
 
 
 async def serve():

@@ -14,7 +14,8 @@ if not exist .venv-bridge (
 )
 call .venv-bridge\Scripts\activate.bat
 python -m pip install --upgrade pip
-pip install "MetaTrader5>=5.0.45" "websockets>=13" "numpy>=1.26,<3"
+REM numpy must be below 2: MetaTrader5 cannot send orders with numpy 2.x
+pip install "MetaTrader5>=5.0.45" "websockets>=13" "numpy>=1.26,<2"
 echo.
 echo This PC connects out to the server. No router port forward is required.
 echo Leave this window open. Leave MetaTrader 5 open and logged in.

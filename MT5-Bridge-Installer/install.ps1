@@ -16,8 +16,8 @@ function Find-Python {
     $cmd = Get-Command python -ErrorAction SilentlyContinue
     if ($cmd -and $cmd.Source -notlike '*WindowsApps*') {
         $v = & $cmd.Source --version 2>&1
-        # MetaTrader5 package supports Python 3.9 - 3.13
-        if ("$v" -match 'Python 3\.(9|1[0-3])\.') { return $cmd.Source }
+        # numpy below 2 (needed by MetaTrader5 to place orders) has no wheels for Python 3.13
+        if ("$v" -match 'Python 3\.(9|1[0-2])\.') { return $cmd.Source }
     }
     return $null
 }
@@ -48,13 +48,25 @@ Copy-Item "$Src\bridge_runner.py"      "$Dir\bridge_runner.py"      -Force
 if ((Test-Path "$Src\.env") -and -not (Test-Path "$Dir\.env")) { Copy-Item "$Src\.env" "$Dir\.env" }
 
 Step 'Creating Python environment and installing packages (first time takes a minute)'
+# An older install may have a Python 3.13 environment, which cannot use numpy below 2. Rebuild it.
+if (Test-Path "$Dir\.venv\Scripts\python.exe") {
+    $vv = & "$Dir\.venv\Scripts\python.exe" --version 2>&1
+    if ("$vv" -match 'Python 3\.13') { Remove-Item "$Dir\.venv" -Recurse -Force }
+}
 if (-not (Test-Path "$Dir\.venv\Scripts\pythonw.exe")) {
     & $py -m venv "$Dir\.venv"
     if ($LASTEXITCODE -ne 0) { throw 'Could not create the virtual environment.' }
 }
-& "$Dir\.venv\Scripts\python.exe" -m pip install --upgrade pip
-& "$Dir\.venv\Scripts\python.exe" -m pip install "MetaTrader5>=5.0.45" "websockets>=13" "numpy>=1.26,<3"
+$vp = "$Dir\.venv\Scripts\python.exe"
+& $vp -m pip install --upgrade pip
+# numpy 2.x makes MetaTrader5 reject every order with (-2, 'Unnamed arguments not allowed')
+& $vp -m pip install "MetaTrader5>=5.0.45" "websockets>=13" "numpy>=1.26,<2"
 if ($LASTEXITCODE -ne 0) { throw 'pip install failed. Check the internet connection and run INSTALL.bat again.' }
+& $vp -m pip install --upgrade "numpy>=1.26,<2"
+$nv = & $vp -c "import numpy; print(numpy.__version__)"
+$mv = & $vp -c "import MetaTrader5; print(MetaTrader5.__version__)"
+Write-Host "Installed: MetaTrader5 $mv, numpy $nv"
+if ("$nv" -like '2.*') { throw "numpy $nv is still installed. Orders would fail. Send this screen to support." }
 
 Step "Registering auto-start for user $User"
 function New-Settings($restart) {

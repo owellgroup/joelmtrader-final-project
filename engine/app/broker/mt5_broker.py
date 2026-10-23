@@ -102,17 +102,27 @@ class MT5Broker(Broker):
 
     def _resolve_symbols(self):
         m = self.mt5
-        all_syms = [s.name for s in (m.symbols_get() or [])]
+        names = [s.name for s in (m.symbols_get() or [])]
+        by_upper = {s.upper(): s for s in names}
+        suffixes = [Settings.symbol_suffix, "", "m", ".m", "micro", ".a", ".r", ".pro", "_", "#"]
         for canon in SYMBOLS:
-            cand = canon + Settings.symbol_suffix
-            if cand in all_syms:
-                name = cand
-            else:
-                matches = sorted([s for s in all_syms if s.upper().startswith(canon)], key=len)
-                alt = "GOLD" if canon == "XAUUSD" else None
-                if not matches and alt:
-                    matches = sorted([s for s in all_syms if s.upper().startswith(alt)], key=len)
-                name = matches[0] if matches else cand
+            name = None
+            for suf in suffixes:
+                name = by_upper.get((canon + (suf or "")).upper())
+                if name:
+                    break
+            if name is None and canon == "XAUUSD":
+                for alt in ("GOLD", "XAUUSD"):
+                    name = next((s for s in names if s.upper().startswith(alt) and not any(ch.isdigit() for ch in s)), None)
+                    if name:
+                        break
+            if name is None:
+                plain = [s for s in names if s.upper().startswith(canon) and not any(ch.isdigit() for ch in s)]
+                name = sorted(plain, key=len)[0] if plain else None
+            if name is None:
+                log.warning("%s is not on this broker. It will stay on the ranking with no price.", canon)
+                self.symbols[canon] = canon
+                continue
             self.symbols[canon] = name
             m.symbol_select(name, True)
         log.info("Symbol map: %s", self.symbols)

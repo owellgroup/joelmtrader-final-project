@@ -238,6 +238,13 @@ def analyze_symbol(symbol, frames, tick, info, zones, cfg, perf, equity, news):
     spread_ratio = spread / plan["sl_dist"]
     blocked_reasons = []
     news_blocked, news_reason = news.blocked(symbol, cfg)
+    # A sell while H4 and H1 are both rising (or a buy while both are falling) is the false
+    # entry that used to get through on M5 noise. Both higher timeframes must not oppose.
+    if d * trends["H4"] < -0.05 and d * trends["H1"] < -0.05:
+        blocked_reasons.append(
+            f"Blocked: H4 {trends['H4']:+.2f} and H1 {trends['H1']:+.2f} both oppose this {plan['side']}")
+    if d * trends["M5"] < -0.15:
+        blocked_reasons.append(f"Blocked: M5 trend {trends['M5']:+.2f} does not agree with this {plan['side']}")
     if news_blocked: blocked_reasons.append(news_reason)
     if spread_ratio > cfg.max_spread_to_sl: blocked_reasons.append(f"Spread too wide ({spread_ratio * 100:.0f}% of stop)")
     if comp["trigger"] < 4: blocked_reasons.append("Waiting for M1 trigger")

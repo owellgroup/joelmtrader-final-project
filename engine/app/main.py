@@ -125,8 +125,10 @@ def quotes():
         try:
             t = broker.tick(s)
         except Exception:                              # noqa: BLE001
-            continue
+            t = None
         if not t:
+            out.append({"symbol": s, "bid": None, "ask": None, "spread": None, "digits": 5,
+                        "changePct": None, "high": None, "low": None, "spark": []})
             continue
         # Candle history is large. The dashboard reads the cache; a scan fills it.
         f1 = md.peek(s, "M1")

@@ -88,42 +88,51 @@ def sr_zones(frames: dict, price: float, ref_atr: float, max_each=4):
 
 # ---------------------------------------------------------------- trendlines
 def _best_line(points, df, atr_v, kind):
-    """points: swing list [(idx, price)]. kind: 'support' (lows) or 'resistance' (highs)."""
-    pts = points[-7:]
-    best, best_score = None, 0
+    """A support line rises or stays flat under price. A resistance line falls or stays flat above it.
+    Two swings are not enough: the line needs a third touch and must still be near the current price."""
+    if atr_v <= 0:
+        return None
     n = len(df)
+    recent = [p for p in points if p[0] >= n - 140]
+    pts = (recent or points)[-8:]
+    best, best_score = None, 0
     hi, lo, cl = df["high"].values, df["low"].values, df["close"].values
+    last = float(cl[-1])
     for a in range(len(pts)):
         for b in range(a + 1, len(pts)):
             (i1, p1), (i2, p2) = pts[a], pts[b]
-            if i2 - i1 < 6:
+            if i2 - i1 < 8:
                 continue
             slope = (p2 - p1) / (i2 - i1)
-            if kind == "support" and slope < 0 and False:
+            if abs(slope) > 0.12 * atr_v:
+                continue
+            if kind == "support" and slope < -0.01 * atr_v:
+                continue
+            if kind == "resistance" and slope > 0.01 * atr_v:
                 continue
             touches, broken = 0, False
             for j in range(i1, n):
                 y = p1 + slope * (j - i1)
                 if kind == "support":
-                    if cl[j] < y - 0.15 * atr_v:
+                    if cl[j] < y - 0.25 * atr_v:
                         broken = True
                         break
-                    if abs(lo[j] - y) < 0.25 * atr_v:
+                    if abs(lo[j] - y) < 0.30 * atr_v:
                         touches += 1
                 else:
-                    if cl[j] > y + 0.15 * atr_v:
+                    if cl[j] > y + 0.25 * atr_v:
                         broken = True
                         break
-                    if abs(hi[j] - y) < 0.25 * atr_v:
+                    if abs(hi[j] - y) < 0.30 * atr_v:
                         touches += 1
-            if broken or touches < 2:
+            price_now = p1 + slope * (n - 1 - i1)
+            if broken or touches < 3 or abs(price_now - last) > 2.5 * atr_v:
                 continue
-            score = touches * 2 + (i2 / n) * 3
+            score = touches * 2 + (i2 / n) * 4 - abs(price_now - last) / atr_v
             if score > best_score:
                 best_score = score
-                best = {"kind": kind, "i1": i1, "p1": p1, "i2": i2, "p2": p2, "slope": slope, "touches": touches}
-    if best:
-        best["price_now"] = best["p1"] + best["slope"] * (n - 1 - best["i1"])
+                best = {"kind": kind, "i1": i1, "p1": p1, "i2": i2, "p2": p2, "slope": slope, "touches": touches,
+                        "price_now": price_now}
     return best
 
 

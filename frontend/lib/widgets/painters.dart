@@ -238,10 +238,13 @@ class CandlePainter extends CustomPainter {
       for (final t in (data['trendlines'] as List? ?? [])) {
         final sup = t['kind'] == 'support';
         final col = sup ? const Color(0xFF10B981) : const Color(0xFFEF4444);
-        final a = Offset(xOfT(d(t['t1'])), yOf(d(t['p1']))), b = Offset(xOfT(d(t['t2'])), yOf(d(t['p2'])));
+        final p1 = d(t['p1']), p2 = d(t['p2']);
+        final room = math.max(hi - lo, 1e-9);
+        if (p1 < lo - room || p1 > hi + room || p2 < lo - room || p2 > hi + room) continue;
+        final a = Offset(xOfT(d(t['t1'])), yOf(p1)), b = Offset(xOfT(d(t['t2'])), yOf(p2));
         final dir = b - a;
-        final ext = b + dir / math.max(dir.dx, 1) * (cw * 6);
-        canvas.drawLine(a, ext, Paint()..color = col..strokeWidth = 2.8..strokeCap = StrokeCap.round);
+        final ext = b + dir / math.max(dir.dx, 1) * (cw * 4);
+        canvas.drawLine(a, Offset(ext.dx.clamp(0, chartW), ext.dy.clamp(topPad, topPad + chartH)), Paint()..color = col..strokeWidth = 2.8..strokeCap = StrokeCap.round);
         canvas.drawCircle(a, 4, Paint()..color = col);
         _text(canvas, sup ? 'Trendline ↗ ${t['touches']}x' : 'Trendline ↘ ${t['touches']}x', b + const Offset(-70, -14), col, 10, bold: true);
       }

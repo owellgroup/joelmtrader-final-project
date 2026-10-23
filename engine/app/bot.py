@@ -196,6 +196,7 @@ class Bot:
                 frames = self.md.frames(s)
                 tick = self.broker.tick(s)
                 if not frames or not tick:
+                    ranks.append(self._pending_rank(s, "Waiting for market data from MT5"))
                     continue
                 info = self.info(s)
                 price = (tick["ask"] + tick["bid"]) / 2
@@ -203,10 +204,11 @@ class Bot:
                 ranks.append(analyze_symbol(s, frames, tick, info, zones, cfg, self.perf, equity, self.news))
             except Exception as e:              # noqa: BLE001
                 log.warning("scan %s failed: %s", s, e, exc_info=True)
+                ranks.append(self._pending_rank(s, f"Scan failed: {e}"))
         # Priority symbols (gold, GBPJPY, EURJPY) always come first; the others only after them.
         ranks.sort(key=lambda r: (0 if r["symbol"] in PRIORITY_SYMBOLS else 1, -r["rankScore"]))
         self._check_priority_affordability(ranks, equity)
-        chosen = next((r for r in ranks if r["tradable"]), None)
+        chosen = next((r for r in ranks if r.get("tradable") and r.get("plan")), None)
         if chosen:
             why = f"{chosen['symbol']} {chosen['side']} selected - score {chosen['score']:.0f}, R:R {chosen['rr']}, setup {chosen['setup']}. " + "; ".join(chosen["reasons"][:4])
         elif ranks:
@@ -221,6 +223,19 @@ class Bot:
         if time.time() - self.last_scan_push > 15:
             self.last_scan_push = time.time()
             self.rep.emit("SCAN", self.scan_data, self.session_id)
+
+    @staticmethod
+    def _pending_rank(symbol, reason):
+        """Always keep every symbol on the ranking table, even when MT5 has no data yet."""
+        return {
+            "symbol": symbol, "direction": 0, "side": "WAIT", "score": 0, "rankScore": -1,
+            "setup": "WAITING", "bias": 0, "price": None, "spread": None, "plan": None,
+            "rr": 0, "lots": 0, "riskAmount": 0, "riskPctAtMinLot": 0,
+            "components": {"htf": 0, "momentum": 0, "location": 0, "trigger": 0, "regime": 0, "volume": 0},
+            "reasons": [], "penalties": [], "priority": symbol in PRIORITY_SYMBOLS,
+            "accountFix": None, "affordability": None, "tradable": False, "blockedReasons": [reason],
+            "timeframes": {},
+        }
 
     def _check_priority_affordability(self, ranks, equity):
         """Every scan: does the balance allow a trade on each priority symbol? If not, say exactly why."""
@@ -301,7 +316,7 @@ class Bot:
         for cand in self.scan_data["rankings"]:
             if len(self.tracked) >= cfg.max_positions:
                 break
-            if not cand["tradable"] or cand["symbol"] in {m["symbol"] for m in self.tracked.values()}:
+            if not cand.get("tradable") or not cand.get("plan") or cand["symbol"] in {m["symbol"] for m in self.tracked.values()}:
                 continue
             if self.sym_cooldown.get(cand["symbol"], 0) > now:
                 continue

@@ -349,12 +349,39 @@ class _RankingCard extends StatelessWidget {
   final Map<String, dynamic>? scan;
   const _RankingCard({this.scan});
 
+  static const symbols = ['XAUUSD', 'GBPJPY', 'EURJPY', 'EURUSD', 'GBPUSD'];
+  static const priority = {'XAUUSD', 'GBPJPY', 'EURJPY'};
   static const labels = {'htf': 'Higher TF', 'momentum': 'Momentum', 'location': 'Location', 'trigger': 'M1 trigger', 'regime': 'Regime', 'volume': 'Volume'};
   static const maxes = {'htf': 30.0, 'momentum': 20.0, 'location': 20.0, 'trigger': 15.0, 'regime': 10.0, 'volume': 5.0};
 
+  static List<Map<String, dynamic>> _rows(Map<String, dynamic>? scan) {
+    final incoming = <String, Map<String, dynamic>>{};
+    for (final raw in (scan?['rankings'] as List?) ?? const []) {
+      if (raw is! Map) continue;
+      final row = Map<String, dynamic>.from(raw);
+      final symbol = row['symbol']?.toString();
+      if (symbol != null) incoming[symbol] = row;
+    }
+    return [
+      for (final symbol in symbols)
+        incoming[symbol] ??
+            {
+              'symbol': symbol,
+              'side': 'WAIT',
+              'score': 0,
+              'setup': 'WAITING',
+              'rr': '-',
+              'priority': priority.contains(symbol),
+              'tradable': false,
+              'blockedReasons': ['Waiting for the engine to scan this pair'],
+              'components': const {},
+            },
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
-    final ranks = (scan?['rankings'] as List?) ?? [];
+    final ranks = _rows(scan);
     final chosen = scan?['chosen']?.toString();
     return AppCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -408,7 +435,7 @@ class _RankRow extends StatelessWidget {
           collapsedShape: const Border(),
           title: Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
             Text(r['symbol'].toString(), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
-            Tag(r['side'].toString(), buy ? Palette.green : Palette.red),
+            Tag(r['side']?.toString() ?? 'WAIT', r['side'] == 'WAIT' ? Palette.slate : (buy ? Palette.green : Palette.red)),
             if (r['priority'] == true) const Tag('PRIORITY', Palette.gold),
             if (selected) const Tag('SELECTED', Palette.brand),
             Text(score.toStringAsFixed(0), style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20, color: barColor)),
@@ -508,13 +535,29 @@ class _EquityCard extends StatelessWidget {
 class _QuotesCard extends StatelessWidget {
   final List quotes;
   const _QuotesCard({required this.quotes});
+
+  static const _order = ['XAUUSD', 'GBPJPY', 'EURJPY', 'EURUSD', 'GBPUSD'];
+
+  static List _orderedQuotes(List quotes) {
+    final bySymbol = <String, Map<String, dynamic>>{};
+    for (final raw in quotes) {
+      if (raw is! Map) continue;
+      final row = Map<String, dynamic>.from(raw);
+      final symbol = row['symbol']?.toString();
+      if (symbol != null) bySymbol[symbol] = row;
+    }
+    return [
+      for (final symbol in _order)
+        bySymbol[symbol] ?? {'symbol': symbol, 'bid': null, 'spread': null, 'digits': 5, 'changePct': null, 'spark': const []},
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     return AppCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const SectionTitle('Live market', subtitle: 'Real-time quotes from MT5'),
-        if (quotes.whereType<Map>().isEmpty) const Padding(padding: EdgeInsets.all(12), child: Text('Waiting for quotes...')),
-        for (final raw in quotes)
+        for (final raw in _orderedQuotes(quotes))
           if (raw is Map)
             Builder(builder: (context) {
               final q = Map<String, dynamic>.from(raw);
@@ -527,7 +570,7 @@ class _QuotesCard extends StatelessWidget {
                 flex: 3,
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(q['symbol'].toString(), style: const TextStyle(fontWeight: FontWeight.w900)),
-                  Text('Spread ${price(q['spread'], i(q['digits']))}', style: TextStyle(fontSize: 11, color: context.muted)),
+                  Text(q['bid'] == null ? 'Waiting for MT5' : 'Spread ${price(q['spread'], i(q['digits']))}', style: TextStyle(fontSize: 11, color: context.muted)),
                 ]),
               ),
               Expanded(
@@ -537,7 +580,7 @@ class _QuotesCard extends StatelessWidget {
               Expanded(
                 flex: 3,
                 child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  Text(price(q['bid'], i(q['digits'])), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+                  Text(q['bid'] == null ? '—' : price(q['bid'], i(q['digits'])), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
                   if (q['changePct'] != null) Text('${d(q['changePct']) >= 0 ? '+' : ''}${d(q['changePct']).toStringAsFixed(2)}%', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: context.pnl(q['changePct']))),
                 ]),
               ),

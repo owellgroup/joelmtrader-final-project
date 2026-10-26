@@ -438,7 +438,7 @@ class _RankRow extends StatelessWidget {
             Tag(r['side']?.toString() ?? 'WAIT', r['side'] == 'WAIT' ? Palette.slate : (buy ? Palette.green : Palette.red)),
             if (r['priority'] == true) const Tag('PRIORITY', Palette.gold),
             if (selected) const Tag('SELECTED', Palette.brand),
-            Text(score.toStringAsFixed(0), style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20, color: barColor)),
+            Text(r['side'] == 'WAIT' ? '—' : score.toStringAsFixed(0), style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20, color: barColor)),
           ]),
           subtitle: Padding(
             padding: const EdgeInsets.only(top: 8),

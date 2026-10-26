@@ -195,13 +195,20 @@ class Bot:
             try:
                 frames = self.md.frames(s)
                 tick = self.broker.tick(s)
-                if not frames or not tick:
+                if not frames:
                     ranks.append(self._pending_rank(s, "Waiting for market data from MT5"))
                     continue
+                if not tick or tick.get("bid", 0) <= 0:
+                    close = float(frames["M5"].df["close"].iloc[-1])
+                    tick = dict(bid=close, ask=close, spread=0.0, time=0, stale=True)
                 info = self.info(s)
                 price = (tick["ask"] + tick["bid"]) / 2
                 zones = st.sr_zones(frames, price, frames["H1"].atr)
-                ranks.append(analyze_symbol(s, frames, tick, info, zones, cfg, self.perf, equity, self.news))
+                row = analyze_symbol(s, frames, tick, info, zones, cfg, self.perf, equity, self.news)
+                if tick.get("stale"):
+                    row["tradable"] = False
+                    row["blockedReasons"] = ["No live bid/ask yet from the broker"] + list(row.get("blockedReasons") or [])
+                ranks.append(row)
             except Exception as e:              # noqa: BLE001
                 log.warning("scan %s failed: %s", s, e, exc_info=True)
                 ranks.append(self._pending_rank(s, f"Scan failed: {e}"))

@@ -49,6 +49,7 @@ class MT5Broker(Broker):
         self._ticks = {}
         self._info_cache = {}
         self._acct_cache = None
+        self._quote_ready = set()
 
     # ---------------------------------------------------------------- connection
     def _module(self):
@@ -100,31 +101,56 @@ class MT5Broker(Broker):
                 log.warning("MT5 connect failed: %s", self._last_error)
                 return {"connected": False, "message": self._last_error}
 
+    def _broker_names(self):
+        try:
+            return [s.name for s in (self.mt5.symbols_get() or [])]
+        except Exception:                               # noqa: BLE001
+            return []
+
+    def _pick_broker_name(self, canon):
+        """Headway and others use GBPJPYm / EURUSDm. Match the live spelling, not the pretty name."""
+        known = self.symbols.get(canon)
+        if known and known != canon:
+            return known
+        names = self._broker_names()
+        by_upper = {n.upper(): n for n in names}
+        for suf in (Settings.symbol_suffix, "", "m", ".m", "micro", ".a", ".r", ".pro", "_", "#"):
+            hit = by_upper.get((canon + (suf or "")).upper())
+            if hit:
+                return hit
+        if canon == "XAUUSD":
+            for alt in ("XAUUSD", "GOLD"):
+                hits = [n for n in names if n.upper().startswith(alt) and not any(ch.isdigit() for ch in n)]
+                if hits:
+                    return sorted(hits, key=len)[0]
+        hits = [n for n in names if n.upper().startswith(canon) and not any(ch.isdigit() for ch in n)]
+        return sorted(hits, key=len)[0] if hits else canon
+
+    def _ensure_symbol(self, canon):
+        """Select the broker symbol and wait until bid/ask are real. First select often returns 0."""
+        name = self._pick_broker_name(canon)
+        self.symbols[canon] = name
+        if self.mt5 is None:
+            return name
+        try:
+            self.mt5.symbol_select(name, True)
+        except Exception:                               # noqa: BLE001
+            return name
+        if name in self._quote_ready:
+            return name
+        deadline = time.time() + 2.5
+        while time.time() <= deadline:
+            t = self.mt5.symbol_info_tick(name)
+            if t is not None and float(getattr(t, "bid", 0) or 0) > 0 and float(getattr(t, "ask", 0) or 0) > 0:
+                self._quote_ready.add(name)
+                return name
+            time.sleep(0.25)
+        log.warning("%s (%s) has no live bid/ask yet", canon, name)
+        return name
+
     def _resolve_symbols(self):
-        m = self.mt5
-        names = [s.name for s in (m.symbols_get() or [])]
-        by_upper = {s.upper(): s for s in names}
-        suffixes = [Settings.symbol_suffix, "", "m", ".m", "micro", ".a", ".r", ".pro", "_", "#"]
         for canon in SYMBOLS:
-            name = None
-            for suf in suffixes:
-                name = by_upper.get((canon + (suf or "")).upper())
-                if name:
-                    break
-            if name is None and canon == "XAUUSD":
-                for alt in ("GOLD", "XAUUSD"):
-                    name = next((s for s in names if s.upper().startswith(alt) and not any(ch.isdigit() for ch in s)), None)
-                    if name:
-                        break
-            if name is None:
-                plain = [s for s in names if s.upper().startswith(canon) and not any(ch.isdigit() for ch in s)]
-                name = sorted(plain, key=len)[0] if plain else None
-            if name is None:
-                log.warning("%s is not on this broker. It will stay on the ranking with no price.", canon)
-                self.symbols[canon] = canon
-                continue
-            self.symbols[canon] = name
-            m.symbol_select(name, True)
+            self._ensure_symbol(canon)
         log.info("Symbol map: %s", self.symbols)
 
     def is_connected(self):
@@ -181,10 +207,11 @@ class MT5Broker(Broker):
                 return cached[1]
             if self.mt5 is None:
                 raise RuntimeError(self._last_error or "MT5 is not connected")
-            i = self.mt5.symbol_info(self.sym(symbol))
+            name = self._ensure_symbol(symbol)
+            i = self.mt5.symbol_info(name)
             if i is None:
                 raise RuntimeError(f"symbol {symbol} not available on this broker")
-            info = dict(symbol=self.sym(symbol), digits=i.digits, point=i.point,
+            info = dict(symbol=name, digits=i.digits, point=i.point,
                         tick_size=i.trade_tick_size or i.point, tick_value=i.trade_tick_value,
                         contract_size=i.trade_contract_size, volume_min=i.volume_min, volume_max=i.volume_max,
                         volume_step=i.volume_step, stops_level=i.trade_stops_level, filling=i.filling_mode)
@@ -194,12 +221,13 @@ class MT5Broker(Broker):
     def tick(self, symbol):
         with self.lock:
             cached = self._ticks.get(symbol)
-            if cached and time.time() - cached[0] < 1:
+            if cached and time.time() - cached[0] < 1 and cached[1]["bid"] > 0:
                 return cached[1]
             if self.mt5 is None:
                 return None
-            t = self.mt5.symbol_info_tick(self.sym(symbol))
-            if t is None:
+            name = self._ensure_symbol(symbol)
+            t = self.mt5.symbol_info_tick(name)
+            if t is None or float(getattr(t, "bid", 0) or 0) <= 0 or float(getattr(t, "ask", 0) or 0) <= 0:
                 return None
             snap = dict(bid=t.bid, ask=t.ask, spread=t.ask - t.bid, time=t.time)
             self._ticks[symbol] = (time.time(), snap)
@@ -209,6 +237,7 @@ class MT5Broker(Broker):
         m = self.mt5
         if m is None:
             return pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])
+        self._ensure_symbol(symbol)
         tfm = {"M1": m.TIMEFRAME_M1, "M5": m.TIMEFRAME_M5, "M15": m.TIMEFRAME_M15, "M30": m.TIMEFRAME_M30,
                "H1": m.TIMEFRAME_H1, "H4": m.TIMEFRAME_H4, "D1": m.TIMEFRAME_D1}[tf]
         with self.lock:
@@ -245,6 +274,8 @@ class MT5Broker(Broker):
         with self.lock:
             m = self.mt5
             t = self.tick(symbol)
+            if t is None:
+                return 1e9
             r = m.order_calc_margin(m.ORDER_TYPE_BUY if side == "BUY" else m.ORDER_TYPE_SELL,
                                     self.sym(symbol), volume, t["ask"] if side == "BUY" else t["bid"])
             return float(r) if r is not None else 1e9

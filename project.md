@@ -41,7 +41,13 @@ In Dokploy, set only the rows that differ from the defaults. The compose file al
 
 Leave `MT5_LOGIN`, `MT5_PASSWORD`, and `MT5_SERVER` empty. You type those in the app after deploy.
 
-After **Deploy / Rebuild**, Dokploy should list three services: `api`, `engine`, `web`. There is no MT5 container.
+After a **successful** Deploy (log ends with containers created, not `Error: ❌`), Dokploy should list `api`, `engine`, `web` (names like `bots-…-api-1`). There is no MT5 container.
+
+If the UI still shows 0 containers:
+1. Open the deployment log — if build/`up` failed, fix that first (nothing will appear).
+2. On the server clear old name/port conflicts, then Redeploy:
+   `docker rm -f forexbot-api forexbot-engine forexbot-web 2>/dev/null; docker network create dokploy-network 2>/dev/null; true`
+3. Confirm from a browser: `http://SERVER_IP:8088` loads. If the site works but the dropdown is empty, that is a Dokploy UI bug — the app is still running.
 
 If Connect MT5 later mentions a host named `mt5`, port `8001`, or port `18812`, the server is on an old build. Redeploy the engine and the web container, then continue.
 

@@ -1,11 +1,14 @@
-# Dokploy Compose app — path must be: ./docker-compose.yml  (repo root)
+# Dokploy → Compose Type: Docker Compose
+# Compose Path: ./docker-compose.yml
 #
-# Dokploy rules this file follows:
-#   - NO container_name (breaks Dokploy UI / logs / metrics)
-#   - every service joins external network dokploy-network
-#   - service names stay: api, engine, web  (used by nginx + ENGINE_URL)
+# Important for Dokploy:
+# - Do NOT set container_name (UI will not list the containers)
+# - Do NOT require external dokploy-network for a first successful deploy
+#   (if that network is missing, images build then `up` fails → 0 containers)
+# - Service names must stay: api, engine, web (nginx + ENGINE_URL use them)
 #
-# After push: Redeploy / Rebuild in Dokploy. You should see api, engine, web.
+# After a green deploy you should see containers named like:
+#   bots-…-api-1 , bots-…-engine-1 , bots-…-web-1
 
 services:
   engine:
@@ -31,9 +34,6 @@ services:
       - engine-data:/data
     expose:
       - "8000"
-    networks:
-      - dokploy-network
-      - default
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
       interval: 30s
@@ -76,9 +76,6 @@ services:
       - "${API_PORT:-8080}:8080"
     depends_on:
       - engine
-    networks:
-      - dokploy-network
-      - default
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/actuator/health"]
       interval: 30s
@@ -98,9 +95,6 @@ services:
       - "${WEB_PORT:-8088}:80"
     depends_on:
       - api
-    networks:
-      - dokploy-network
-      - default
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
       interval: 30s
@@ -110,8 +104,3 @@ services:
 
 volumes:
   engine-data:
-
-networks:
-  dokploy-network:
-    external: true
-  default:

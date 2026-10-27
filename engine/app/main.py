@@ -61,7 +61,8 @@ async def mt5_bridge(websocket: WebSocket):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "mode": broker.name, "connected": broker.is_connected(), "running": bot.enabled}
+    return {"ok": True, "mode": broker.name, "connected": broker.is_connected(), "running": bot.enabled,
+            "symbols": list(SYMBOLS), "timeframes": list(TIMEFRAMES), "build": "2026-10-27-jpy-fix"}
 
 
 @router.get("/bot/status")

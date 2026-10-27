@@ -49,9 +49,13 @@ public class SecurityConfig {
     @Bean
     CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration c = new CorsConfiguration();
+        // Patterns + credentials: required for Flutter web (Authorization header).
         c.setAllowedOriginPatterns(List.of("*"));
-        c.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        c.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         c.setAllowedHeaders(List.of("*"));
+        c.setExposedHeaders(List.of("Authorization", "Content-Type"));
+        c.setAllowCredentials(true);
+        c.setMaxAge(3600L);
         UrlBasedCorsConfigurationSource s = new UrlBasedCorsConfigurationSource();
         s.registerCorsConfiguration("/**", c);
         return s;

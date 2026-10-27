@@ -373,7 +373,7 @@ class _RankingCard extends StatelessWidget {
               'rr': '-',
               'priority': priority.contains(symbol),
               'tradable': false,
-              'blockedReasons': ['Waiting for the engine to scan this pair'],
+              'blockedReasons': ['Waiting for market data from MT5 for $symbol'],
               'components': const {},
             },
     ];

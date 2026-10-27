@@ -76,7 +76,12 @@ class _ChartsPageState extends State<ChartsPage> {
         });
       }
     } on ApiException catch (e) {
-      if (mounted) setState(() => _error = e.message);
+      final msg = e.message;
+      // Never leave JPY charts stuck on the old "unsupported" wording.
+      final friendly = msg.toLowerCase().contains('unsupported')
+          ? 'Engine/API still needs a redeploy for $_symbol. After redeploy, Retry.'
+          : msg;
+      if (mounted) setState(() => _error = friendly);
     } finally {
       _loading = false;
     }

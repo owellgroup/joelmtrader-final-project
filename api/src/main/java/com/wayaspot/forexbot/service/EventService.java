@@ -50,7 +50,7 @@ public class EventService {
             case "TRADE_FOUND" -> found(d);
             case "TRADE_CLOSED" -> closed(d, sessionId);
             case "SNAPSHOT" -> snapshot(d, sessionId);
-            case "SCAN" -> live.setScan(d);
+            case "SCAN" -> live.setScan(MarketSymbols.ensureScan(mapper.valueToTree(d), mapper));
             case "ALERT" -> alert(d, sessionId);
             default -> log.debug("ignored event {}", type);
         }

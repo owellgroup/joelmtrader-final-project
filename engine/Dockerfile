@@ -3,6 +3,8 @@
 FROM python:3.12-slim
 WORKDIR /srv
 ENV PYTHONUNBUFFERED=1 DATA_DIR=/data
+ARG BUILD_ID=2026-10-27-jpy-fix
+ENV BUILD_ID=${BUILD_ID}
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app

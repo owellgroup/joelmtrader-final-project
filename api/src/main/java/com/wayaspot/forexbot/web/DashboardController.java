@@ -1,6 +1,7 @@
 package com.wayaspot.forexbot.web;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wayaspot.forexbot.entity.AccountSnapshot;
 import com.wayaspot.forexbot.entity.Trade;
 import com.wayaspot.forexbot.repo.AccountSnapshotRepository;
@@ -9,6 +10,7 @@ import com.wayaspot.forexbot.service.BotService;
 import com.wayaspot.forexbot.service.EngineClient;
 import com.wayaspot.forexbot.service.EngineException;
 import com.wayaspot.forexbot.service.LiveState;
+import com.wayaspot.forexbot.service.MarketSymbols;
 import com.wayaspot.forexbot.service.TradeStats;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -27,14 +29,16 @@ public class DashboardController {
     private final TradeRepository trades;
     private final AccountSnapshotRepository snapshots;
     private final LiveState live;
+    private final ObjectMapper mapper;
 
     public DashboardController(BotService bot, EngineClient engine, TradeRepository trades,
-                               AccountSnapshotRepository snapshots, LiveState live) {
+                               AccountSnapshotRepository snapshots, LiveState live, ObjectMapper mapper) {
         this.bot = bot;
         this.engine = engine;
         this.trades = trades;
         this.snapshots = snapshots;
         this.live = live;
+        this.mapper = mapper;
     }
 
     @GetMapping
@@ -77,12 +81,15 @@ public class DashboardController {
         }
         out.put("equityCurve", curve);
 
-        Object scan = live.getScan();
+        JsonNode scanNode = null;
         try {
-            JsonNode s = engine.get("/scan");
-            scan = s;
-        } catch (EngineException ignored) { }
-        out.put("scan", scan);
+            scanNode = engine.get("/scan");
+        } catch (EngineException ignored) {
+            Object cached = live.getScan();
+            if (cached instanceof JsonNode node) scanNode = node;
+            else if (cached != null) scanNode = mapper.valueToTree(cached);
+        }
+        out.put("scan", MarketSymbols.ensureScan(scanNode, mapper));
         return out;
     }
 }

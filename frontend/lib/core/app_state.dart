@@ -2,9 +2,25 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api.dart';
 
-/// Live site. The web container proxies /api to the Java API on the same host.
+/// Public backend gateway (nginx → Java API). Also works on :8080 (API direct).
 /// Override at build time with --dart-define=API_URL=http://145.241.187.174:8088
 const String kDefaultApiUrl = String.fromEnvironment('API_URL', defaultValue: 'http://145.241.187.174:8088');
+
+String _normalizeApiUrl(String? raw) {
+  var url = (raw ?? '').trim();
+  if (url.endsWith('/')) url = url.substring(0, url.length - 1);
+  // Old / broken bookmarks → live gateway
+  if (url.isEmpty ||
+      url.contains('localhost') ||
+      url.contains('127.0.0.1') ||
+      url.contains('84.8.131.140') ||
+      url.contains('144.241.187.174') ||
+      url == 'http://145.241.187.174' ||
+      url == 'https://145.241.187.174') {
+    return kDefaultApiUrl;
+  }
+  return url;
+}
 
 /// Holds session (JWT persisted on-device -> stays logged in until you log out) and theme.
 class AppState extends ChangeNotifier {
@@ -21,11 +37,8 @@ class AppState extends ChangeNotifier {
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
-    var url = _prefs.getString('apiUrl');
-    if (url == null || url.contains('localhost') || url.contains('127.0.0.1') || url.contains('84.8.131.140') || url.contains('144.241.187.174') || url == 'http://145.241.187.174' || url == 'http://145.241.187.174/') {
-      url = kDefaultApiUrl;
-      await _prefs.setString('apiUrl', url);
-    }
+    final url = _normalizeApiUrl(_prefs.getString('apiUrl'));
+    await _prefs.setString('apiUrl', url);
     final token = _prefs.getString('token');
     api = Api(url, token: token);
     api.onUnauthorized = () => logout(silent: false);
@@ -52,7 +65,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> login(String url, String username, String password) async {
-    api.baseUrl = url.trim();
+    api.baseUrl = _normalizeApiUrl(url);
     final res = await api.post('/api/auth/login', body: {'username': username.trim(), 'password': password});
     api.token = res['token'];
     user = Map<String, dynamic>.from(res['user']);

@@ -128,7 +128,7 @@ class _LoginPageState extends State<LoginPage> {
                                 keyboardType: TextInputType.url,
                                 autofillHints: const [AutofillHints.url],
                                 contextMenuBuilder: (context, state) => AdaptiveTextSelectionToolbar.editableText(editableTextState: state),
-                                decoration: const InputDecoration(labelText: 'Live backend URL', prefixIcon: Icon(Icons.dns_outlined), hintText: 'http://145.241.187.174:8088'),
+                                decoration: const InputDecoration(labelText: 'Live backend URL', prefixIcon: Icon(Icons.dns_outlined), hintText: 'http://145.241.187.174:8088 or :8080'),
                               ),
                             )
                           : const SizedBox(width: double.infinity),

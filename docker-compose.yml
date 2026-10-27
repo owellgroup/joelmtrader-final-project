@@ -1,12 +1,12 @@
 # Dokploy → Compose Type: Docker Compose
 # Compose Path: ./docker-compose.yml
 #
-# Backend only: engine + api
-# (Flutter web is NOT deployed here — run it locally or host it elsewhere.)
+# Backend stack:
+#   engine  — Python trading engine
+#   api     — Java API (direct :8080)
+#   gateway — nginx on :8088 → /api + /mt5-bridge  (what Flutter apps use)
 #
-# Rules for Dokploy:
-# - Do NOT set container_name
-# - Service names stay: api, engine
+# No Flutter web build here.
 
 services:
   engine:
@@ -80,6 +80,23 @@ services:
       timeout: 5s
       retries: 6
       start_period: 90s
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8088}:80"
+    depends_on:
+      - api
+      - engine
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 volumes:
   engine-data:

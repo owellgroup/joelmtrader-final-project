@@ -30,20 +30,28 @@ def tf_summary(fr):
             "macd_hist": float(r.macd_hist), "bb_width": f(r.bb_bw, 4)}
 
 
-def htf_direction(trends, structs):
-    """Professionals do not fade Daily+H4. Returns +1 buy, -1 sell, 0 wait."""
+def htf_direction(trends, structs, bias=0.0):
+    """Pick the market side from Daily → H4 → H1. Returns +1 buy, -1 sell, 0 only if flat."""
     d1, h4, h1 = trends.get("D1", 0.0), trends.get("H4", 0.0), trends.get("H1", 0.0)
     s_d1 = (structs.get("D1") or {}).get("trend", 0)
     s_h4 = (structs.get("H4") or {}).get("trend", 0)
     d1_side = sgn(d1) or sgn(s_d1)
     h4_side = sgn(h4) or sgn(s_h4)
+    h1_side = sgn(h1)
+    # Clear agreement
     if d1_side and h4_side and d1_side == h4_side:
         return int(d1_side)
-    if d1_side and h4_side and d1_side != h4_side:
-        return 0
-    if h4_side and sgn(h1) == h4_side and abs(h4) >= 0.18:
+    # H4 leads when H1 confirms (common on GBPJPY / GBPUSD when Daily lags)
+    if h4_side and (h1_side == h4_side or abs(h4) >= 0.22):
         return int(h4_side)
-    if d1_side and abs(d1) >= 0.28:
+    if d1_side and abs(d1) >= 0.22:
+        return int(d1_side)
+    # Weighted bias fallback so the pair is never stuck on WAIT in the ranking table
+    if abs(bias) >= 0.08:
+        return int(sgn(bias))
+    if h4_side:
+        return int(h4_side)
+    if d1_side:
         return int(d1_side)
     return 0
 
@@ -269,7 +277,7 @@ def analyze_symbol(symbol, frames, tick, info, zones, cfg, perf, equity, news):
     trends = {tf: tf_trend(fr) for tf, fr in frames.items()}
     bias = sum(w * trends.get(tf, 0.0) for tf, w in HTF_W.items())
     structs = {tf: fr.struct for tf, fr in frames.items()}
-    locked = htf_direction(trends, structs)
+    locked = htf_direction(trends, structs, bias)
     obs = []
     for tf in ("M5", "M10", "M15", "H1"):
         if tf in frames:
@@ -284,20 +292,31 @@ def analyze_symbol(symbol, frames, tick, info, zones, cfg, perf, equity, news):
                pats10=st.candle_patterns(frames["M10"].df) if "M10" in frames else [],
                breakout=st.breakout_state(f5.df, zones, atr5), digits=info["digits"])
 
+    # Always score BUY and SELL so every pair ranks like the others (never a blank WAIT row).
     scored = []
-    sides = (locked,) if locked else (1, -1)
-    for d in sides:
+    for d in (1, -1):
         total, comp, why, pen, setup, located = score_direction(d, ctx)
+        # Prefer the HTF side when scores are close
+        if locked and d == locked:
+            total += 4
         scored.append((total, comp, why, pen, setup, located, d))
     scored.sort(key=lambda x: x[0], reverse=True)
     total, comp, why, pen, setup, located, d = scored[0]
     other = scored[1][0] if len(scored) > 1 else None
+    total = clip(total - (4 if locked and d == locked else 0), 0, 100)  # remove ranking nudge from the published score
 
-    # When Daily/H4 do not lock a side, keep the better score for the table but do not trade it.
-    wait_for_htf = locked == 0
-    if wait_for_htf:
-        pen.append("Daily and H4 do not agree — waiting for a clear market direction")
-    elif other is not None and total - other < 6:
+    wait_for_htf = False
+    if locked == 0:
+        wait_for_htf = True
+        pen.append("Higher timeframes are flat — no clear Daily/H4 direction yet")
+    elif locked and d != locked:
+        # Keep the HTF side for trading; do not publish a counter-trend idea as the active side
+        for row in scored:
+            if row[6] == locked:
+                total, comp, why, pen, setup, located, d = row
+                total = clip(total - 4, 0, 100)
+                break
+    if other is not None and abs(scored[0][0] - scored[1][0]) < 5 and locked == 0:
         wait_for_htf = True
         pen.append("BUY and SELL scores are too close — no edge")
 
@@ -361,18 +380,17 @@ def analyze_symbol(symbol, frames, tick, info, zones, cfg, perf, equity, news):
     why.append(f"R:R {plan['rr']:.2f} ({plan['note']})")
 
     rank_score = total - 20 * min(spread_ratio, 1.0) - (30 if why_not else 0)
-    show_side = plan["side"] if locked else "WAIT"
-    show_dir = d if locked else 0
+    # Always publish BUY/SELL + score + plan like EURUSD/EURJPY — WAIT only means "not tradable yet".
     story = (
-        f"{'BUY' if locked == 1 else 'SELL' if locked == -1 else 'No Daily/H4 lock'} "
-        f"from Daily {trends.get('D1', 0):+.2f} / H4 {trends.get('H4', 0):+.2f} / "
-        f"H1 {trends.get('H1', 0):+.2f}. "
+        f"{plan['side']} idea from Daily {trends.get('D1', 0):+.2f} / H4 {trends.get('H4', 0):+.2f} / "
+        f"H1 {trends.get('H1', 0):+.2f} (HTF lock "
+        f"{'BUY' if locked == 1 else 'SELL' if locked == -1 else 'none'}). "
         + (" ".join(why[:3]) if why else "Waiting for location and trigger.")
     )
     return {
-        "symbol": symbol, "direction": show_dir, "side": show_side, "score": round(total, 1), "rankScore": round(rank_score, 1),
+        "symbol": symbol, "direction": d, "side": plan["side"], "score": round(total, 1), "rankScore": round(rank_score, 1),
         "setup": setup, "bias": round(bias, 3), "price": f(price, info["digits"]), "spread": f(spread, info["digits"]),
-        "plan": {k: (f(v, info["digits"]) if isinstance(v, float) else v) for k, v in plan.items() if k != "zone_block"} if locked else None,
+        "plan": {k: (f(v, info["digits"]) if isinstance(v, float) else v) for k, v in plan.items() if k != "zone_block"},
         "rr": round(plan["rr"], 2), "lots": lots, "riskAmount": round(risk_amt, 2),
         "riskPctAtMinLot": round(risk_pct_at_min_lot(equity, plan["sl_dist"], info), 2),
         "components": {k: round(v, 1) for k, v in comp.items()}, "reasons": why, "penalties": pen,

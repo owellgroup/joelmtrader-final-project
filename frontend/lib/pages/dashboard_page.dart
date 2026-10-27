@@ -439,7 +439,7 @@ class _RankRow extends StatelessWidget {
             if (r['htfLock'] != null && r['htfLock'] != 'WAIT') Tag('HTF ${r['htfLock']}', Palette.brand),
             if (r['priority'] == true) const Tag('PRIORITY', Palette.gold),
             if (selected) const Tag('SELECTED', Palette.brand),
-            Text(r['side'] == 'WAIT' ? '—' : score.toStringAsFixed(0), style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20, color: barColor)),
+            Text(score.toStringAsFixed(0), style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20, color: barColor)),
           ]),
           subtitle: Padding(
             padding: const EdgeInsets.only(top: 8),

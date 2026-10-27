@@ -1,14 +1,12 @@
 # Dokploy → Compose Type: Docker Compose
 # Compose Path: ./docker-compose.yml
 #
-# Important for Dokploy:
-# - Do NOT set container_name (UI will not list the containers)
-# - Do NOT require external dokploy-network for a first successful deploy
-#   (if that network is missing, images build then `up` fails → 0 containers)
-# - Service names must stay: api, engine, web (nginx + ENGINE_URL use them)
+# Backend only: engine + api
+# (Flutter web is NOT deployed here — run it locally or host it elsewhere.)
 #
-# After a green deploy you should see containers named like:
-#   bots-…-api-1 , bots-…-engine-1 , bots-…-web-1
+# Rules for Dokploy:
+# - Do NOT set container_name
+# - Service names stay: api, engine
 
 services:
   engine:
@@ -82,25 +80,6 @@ services:
       timeout: 5s
       retries: 8
       start_period: 90s
-
-  web:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        API_URL: ${PUBLIC_API_URL:-http://145.241.187.174:8088}
-        BUILD_ID: ${BUILD_ID:-2026-10-27-jpy-fix}
-    restart: unless-stopped
-    ports:
-      - "${WEB_PORT:-8088}:80"
-    depends_on:
-      - api
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
 
 volumes:
   engine-data:

@@ -41,7 +41,7 @@ In Dokploy, set only the rows that differ from the defaults. The compose file al
 
 Leave `MT5_LOGIN`, `MT5_PASSWORD`, and `MT5_SERVER` empty. You type those in the app after deploy.
 
-After a **successful** Deploy (log ends with containers created, not `Error: ❌`), Dokploy should list `api`, `engine`, `web` (names like `bots-…-api-1`). There is no MT5 container.
+After a **successful** Deploy (log ends with containers created, not `Error: ❌`), Dokploy should list **`api`** and **`engine`** only (Flutter web is not part of this compose). Point the Flutter app at `http://SERVER_IP:8080`.
 
 If the UI still shows 0 containers:
 1. Open the deployment log — if build/`up` failed, fix that first (nothing will appear).

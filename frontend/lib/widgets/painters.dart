@@ -135,7 +135,14 @@ class CandlePainter extends CustomPainter {
     }
     double yOf(double p) => topPad + (hi - p) / (hi - lo) * chartH;
     double xOfIdx(double idx) => (idx - start) * cw;
-    double xOfT(num t) => xOfIdx((t - t0) / tfSec);
+    // Prefer candle index (handles weekend/session gaps on H4/D1). Fall back to nearest timestamp.
+    double xOfOverlay(dynamic item, {String tKey = 't', String iKey = 'i'}) {
+      if (item is Map && item[iKey] != null) {
+        return xOfIdx(d(item[iKey]));
+      }
+      final t = item is Map ? d(item[tKey]) : d(item);
+      return xOfIdx(_indexForTime(candles, t, t0, tfSec).toDouble());
+    }
     final rect = Rect.fromLTWH(0, topPad, chartW, chartH);
 
     canvas.save();
@@ -174,7 +181,7 @@ class CandlePainter extends CustomPainter {
     if (layers.contains('fvg')) {
       for (final g in (data['fvgs'] as List? ?? [])) {
         final col = g['type'] == 'bullish' ? Colors.purple : Colors.deepOrange;
-        final x = math.max(0.0, xOfT(d(g['t'])));
+        final x = math.max(0.0, xOfOverlay(g));
         final r = Rect.fromLTRB(x, yOf(d(g['high'])), chartW, yOf(d(g['low'])));
         canvas.drawRect(r, Paint()..color = col.withOpacity(0.10));
         _text(canvas, 'FVG', Offset(x + 3, r.top + 1), col, 9, bold: true);
@@ -184,7 +191,7 @@ class CandlePainter extends CustomPainter {
       for (final o in (data['orderBlocks'] as List? ?? [])) {
         final bull = o['type'] == 'bullish';
         final col = bull ? Palette.blue : Palette.gold;
-        final x = math.max(0.0, xOfT(d(o['t'])));
+        final x = math.max(0.0, xOfOverlay(o));
         final r = Rect.fromLTRB(x, yOf(d(o['high'])), chartW, yOf(d(o['low'])));
         canvas.drawRect(r, Paint()..color = col.withOpacity(0.16));
         canvas.drawRect(r, Paint()..color = col.withOpacity(0.8)..style = PaintingStyle.stroke..strokeWidth = 1.2);
@@ -195,21 +202,23 @@ class CandlePainter extends CustomPainter {
     final ind = (data['indicators'] as Map?) ?? {};
     if (layers.contains('bb')) {
       final up = _series(ind['bbUp']), lw = _series(ind['bbLo']);
-      final up0 = n - up.length;
+      final len = math.min(math.min(up.length, lw.length), n);
       final path = Path();
       var started = false;
-      for (var k = 0; k < up.length; k++) {
+      for (var k = 0; k < len; k++) {
         if (up[k] == null) continue;
-        final p = Offset(xOfIdx((k + up0).toDouble()), yOf(up[k]!));
+        final p = Offset(xOfIdx(k.toDouble()), yOf(up[k]!));
         started ? path.lineTo(p.dx, p.dy) : path.moveTo(p.dx, p.dy);
         started = true;
       }
-      for (var k = lw.length - 1; k >= 0; k--) {
+      for (var k = len - 1; k >= 0; k--) {
         if (lw[k] == null) continue;
-        path.lineTo(xOfIdx((k + up0).toDouble()), yOf(lw[k]!));
+        path.lineTo(xOfIdx(k.toDouble()), yOf(lw[k]!));
       }
-      path.close();
-      canvas.drawPath(path, Paint()..color = Colors.indigo.withOpacity(0.07));
+      if (started) {
+        path.close();
+        canvas.drawPath(path, Paint()..color = Colors.indigo.withOpacity(0.07));
+      }
       _line(canvas, up, n, xOfIdx, yOf, Colors.indigo.withOpacity(0.5), 1);
       _line(canvas, lw, n, xOfIdx, yOf, Colors.indigo.withOpacity(0.5), 1);
     }
@@ -236,7 +245,7 @@ class CandlePainter extends CustomPainter {
     // ---- swings
     if (layers.contains('swings')) {
       for (final s in (data['swings'] as List? ?? [])) {
-        final x = xOfT(d(s['t'])), hi2 = s['kind'] == 'high';
+        final x = xOfOverlay(s), hi2 = s['kind'] == 'high';
         final y = yOf(d(s['p'])) + (hi2 ? -7 : 7);
         final p = Path();
         if (hi2) {
@@ -255,9 +264,10 @@ class CandlePainter extends CustomPainter {
         final p1 = d(t['p1']), p2 = d(t['p2']);
         final room = math.max(hi - lo, 1e-9);
         if (p1 < lo - room || p1 > hi + room || p2 < lo - room || p2 > hi + room) continue;
-        final a = Offset(xOfT(d(t['t1'])), yOf(p1)), b = Offset(xOfT(d(t['t2'])), yOf(p2));
+        final a = Offset(xOfOverlay(t, tKey: 't1', iKey: 'i1'), yOf(p1));
+        final b = Offset(xOfOverlay(t, tKey: 't2', iKey: 'i2'), yOf(p2));
         final dir = b - a;
-        final ext = b + dir / math.max(dir.dx, 1) * (cw * 4);
+        final ext = b + dir / math.max(dir.dx.abs(), 1) * (cw * 4);
         canvas.drawLine(a, Offset(ext.dx.clamp(0, chartW), ext.dy.clamp(topPad, topPad + chartH)), Paint()..color = col..strokeWidth = 2.8..strokeCap = StrokeCap.round);
         canvas.drawCircle(a, 4, Paint()..color = col);
         _text(canvas, sup ? 'Trendline ↗ ${t['touches']}x' : 'Trendline ↘ ${t['touches']}x', b + const Offset(-70, -14), col, 10, bold: true);
@@ -284,7 +294,7 @@ class CandlePainter extends CustomPainter {
     }
     // ---- markers
     for (final m in (data['markers'] as List? ?? [])) {
-      final p = Offset(xOfT(d(m['t'])), yOf(d(m['p'])));
+      final p = Offset(xOfOverlay(m), yOf(d(m['p'])));
       canvas.drawCircle(p, 6, Paint()..color = Palette.gold.withOpacity(0.35));
       _text(canvas, m['label'].toString(), p + const Offset(-60, -24), Palette.gold, 10, bold: true);
     }
@@ -334,16 +344,38 @@ class CandlePainter extends CustomPainter {
 
   List<double?> _series(dynamic raw) => ((raw as List?) ?? []).map<double?>((e) => e == null ? null : d(e)).toList();
 
+  /// Map a unix timestamp onto the nearest candle index (gap-safe for H4/D1 weekends).
+  static int _indexForTime(List candles, double t, double t0, double tfSec) {
+    if (candles.isEmpty) return 0;
+    var lo = 0, hi = candles.length - 1;
+    if (t <= d(candles.first[0])) return 0;
+    if (t >= d(candles.last[0])) return hi;
+    while (lo <= hi) {
+      final mid = (lo + hi) >> 1;
+      final mt = d(candles[mid][0]);
+      if (mt == t) return mid;
+      if (mt < t) {
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    final a = hi.clamp(0, candles.length - 1);
+    final b = lo.clamp(0, candles.length - 1);
+    return (t - d(candles[a][0])).abs() <= (t - d(candles[b][0])).abs() ? a : b;
+  }
+
   void _line(Canvas canvas, List<double?> s, int n, double Function(double) xf, double Function(double) yf, Color c, double w, {bool dashed = false}) {
-    final off = n - s.length;
+    // Series is already aligned 1:1 with candles (trailing null for the forming bar).
+    final len = math.min(s.length, n);
     Offset? prev;
     final paint = Paint()..color = c..strokeWidth = w..style = PaintingStyle.stroke;
-    for (var k = 0; k < s.length; k++) {
+    for (var k = 0; k < len; k++) {
       if (s[k] == null) {
         prev = null;
         continue;
       }
-      final p = Offset(xf((k + off).toDouble()), yf(s[k]!));
+      final p = Offset(xf(k.toDouble()), yf(s[k]!));
       if (prev != null && !(dashed && k % 4 == 0)) canvas.drawLine(prev, p, paint);
       prev = p;
     }

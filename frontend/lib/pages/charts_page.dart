@@ -55,47 +55,68 @@ class _ChartsPageState extends State<ChartsPage> {
   }
 
   Future<void> _load({bool silent = false}) async {
-    if (_loading) return;
+    if (_loading && silent) return;
+    final reqSymbol = _symbol;
+    final reqTf = _tf;
     _loading = true;
-    if (!silent && mounted) setState(() => _data = null);
+    if (!silent && mounted) {
+      setState(() {
+        _data = null;
+        _rank = null;
+        _error = null;
+      });
+    }
     final api = context.read<AppState>().api;
     try {
-      final r = await api.get('/api/market/analysis/$_symbol', query: {'tf': _tf, 'bars': 140});
+      final r = await api.get('/api/market/analysis/$reqSymbol', query: {'tf': reqTf, 'bars': 140});
       Map<String, dynamic>? rank;
       try {
         final s = await api.get('/api/market/scan');
         for (final x in (s['rankings'] as List)) {
-          if (x['symbol'] == _symbol) rank = Map<String, dynamic>.from(x);
+          if (x['symbol'] == reqSymbol) rank = Map<String, dynamic>.from(x);
         }
       } catch (_) {}
-      if (mounted) {
-        setState(() {
-          _data = Map<String, dynamic>.from(r);
-          _rank = rank;
-          _error = null;
-        });
-      }
+      // Drop stale responses if the user switched symbol/TF mid-request.
+      if (!mounted || reqSymbol != _symbol || reqTf != _tf) return;
+      setState(() {
+        _data = Map<String, dynamic>.from(r);
+        _rank = rank;
+        _error = null;
+      });
     } on ApiException catch (e) {
+      if (!mounted || reqSymbol != _symbol || reqTf != _tf) return;
       final msg = e.message;
       // Never leave JPY charts stuck on the old "unsupported" wording.
       final friendly = msg.toLowerCase().contains('unsupported')
-          ? 'Engine/API still needs a redeploy for $_symbol. After redeploy, Retry.'
+          ? 'Engine/API still needs a redeploy for $reqSymbol. After redeploy, Retry.'
           : msg;
-      if (mounted) setState(() => _error = friendly);
+      setState(() => _error = friendly);
     } finally {
-      _loading = false;
+      if (reqSymbol == _symbol && reqTf == _tf) _loading = false;
     }
   }
 
   void _pickSymbol(String s) {
     if (s == _symbol) return;
-    setState(() => _symbol = s);
+    _loading = false; // allow the new request immediately
+    setState(() {
+      _symbol = s;
+      _data = null;
+      _rank = null;
+      _error = null;
+    });
     _load();
   }
 
   void _pickTf(String t) {
     if (t == _tf) return;
-    setState(() => _tf = t);
+    _loading = false;
+    setState(() {
+      _tf = t;
+      _data = null;
+      _rank = null;
+      _error = null;
+    });
     _load();
   }
 

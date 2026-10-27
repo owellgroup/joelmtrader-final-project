@@ -12,5 +12,7 @@ WORKDIR /app
 COPY --from=build /build/target/forexbot-api-1.0.0.jar app.jar
 ENV JAVA_OPTS="-Xms128m -Xmx512m -Duser.timezone=UTC"
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s CMD wget -qO- http://localhost:8080/actuator/health || exit 1
+# Liveness only — overall /actuator/health can be DOWN (e.g. DB blip) without trapping the container in "starting".
+HEALTHCHECK --interval=20s --timeout=5s --start-period=90s --retries=6 \
+  CMD wget -qO- http://127.0.0.1:8080/actuator/health/liveness || exit 1
 ENTRYPOINT ["sh","-c","java $JAVA_OPTS -jar app.jar"]

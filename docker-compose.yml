@@ -75,10 +75,10 @@ services:
     depends_on:
       - engine
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/actuator/health"]
-      interval: 30s
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/actuator/health/liveness"]
+      interval: 20s
       timeout: 5s
-      retries: 8
+      retries: 6
       start_period: 90s
 
 volumes:

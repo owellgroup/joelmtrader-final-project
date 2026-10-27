@@ -15,7 +15,7 @@ SPECS = {
     "GBPJPY": dict(base=195.0, digits=3, contract=100000.0, spread=0.025, sigma=0.000060, fx=1 / 150.0),
     "EURJPY": dict(base=163.0, digits=3, contract=100000.0, spread=0.020, sigma=0.000055, fx=1 / 150.0),
 }
-RULE = {"M1": "1min", "M5": "5min", "M15": "15min", "M30": "30min", "H1": "1h", "H4": "4h", "D1": "1D"}
+RULE = {"M1": "1min", "M5": "5min", "M10": "10min", "M15": "15min", "M30": "30min", "H1": "1h", "H4": "4h", "D1": "1D"}
 HISTORY_DAYS = 90
 
 
@@ -130,7 +130,7 @@ class PaperBroker(Broker):
         with self.lock:
             base = self.m1[symbol]
             cur = self.cur[symbol]
-            need = min(len(base), count * (RULE and {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440}[tf]) + 1500)
+            need = min(len(base), count * (RULE and {"M1": 1, "M5": 5, "M10": 10, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440}[tf]) + 1500)
             df = pd.concat([base.iloc[-need:], pd.DataFrame([cur])], ignore_index=True)
         if tf == "M1":
             return df.iloc[-count:].reset_index(drop=True)

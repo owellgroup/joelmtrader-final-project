@@ -1,4 +1,4 @@
-"""Multi-timeframe scoring engine: Daily -> H4 -> H1 -> M30 -> M15 -> M5 -> M1 trigger."""
+"""Top-down scoring: Daily sets the side, H4/H1 confirm, M30-M5 locate, M10/M5/M1 trigger."""
 import math
 import numpy as np
 
@@ -6,7 +6,8 @@ from . import structure as st
 from .config import PRIORITY_SYMBOLS
 from .risk import risk_pct_at_min_lot, size_position, loss_per_lot
 
-HTF_W = {"D1": 0.15, "H4": 0.25, "H1": 0.25, "M30": 0.15, "M15": 0.20}
+# Daily and H4 decide where the market is going. Lower TFs only time the entry.
+HTF_W = {"D1": 0.22, "H4": 0.24, "H1": 0.20, "M30": 0.12, "M15": 0.12, "M10": 0.10}
 ABBR = {1: "bullish", -1: "bearish"}
 
 
@@ -29,22 +30,41 @@ def tf_summary(fr):
             "macd_hist": float(r.macd_hist), "bb_width": f(r.bb_bw, 4)}
 
 
-def build_plan(d, tick, info, atr5, f5, zones, cfg, tight=False):
+def htf_direction(trends, structs):
+    """Professionals do not fade Daily+H4. Returns +1 buy, -1 sell, 0 wait."""
+    d1, h4, h1 = trends.get("D1", 0.0), trends.get("H4", 0.0), trends.get("H1", 0.0)
+    s_d1 = (structs.get("D1") or {}).get("trend", 0)
+    s_h4 = (structs.get("H4") or {}).get("trend", 0)
+    d1_side = sgn(d1) or sgn(s_d1)
+    h4_side = sgn(h4) or sgn(s_h4)
+    if d1_side and h4_side and d1_side == h4_side:
+        return int(d1_side)
+    if d1_side and h4_side and d1_side != h4_side:
+        return 0
+    if h4_side and sgn(h1) == h4_side and abs(h4) >= 0.18:
+        return int(h4_side)
+    if d1_side and abs(d1) >= 0.28:
+        return int(d1_side)
+    return 0
+
+
+def build_plan(d, tick, info, atr5, f5, zones, cfg, tight=False, f15=None):
     spread = tick["ask"] - tick["bid"]
     entry = tick["ask"] if d == 1 else tick["bid"]
     mid = (tick["ask"] + tick["bid"]) / 2
-    lows = [p for i, p in f5.lows if i > len(f5.df) - 40 and p < mid] if d == 1 else \
-           [p for i, p in f5.highs if i > len(f5.df) - 40 and p > mid]
-    if lows:
-        anchor = max(lows) if d == 1 else min(lows)           # nearest protective swing
-        struct_dist = abs(entry - anchor) + 0.3 * atr5
+    src = f15 if f15 is not None and len(getattr(f15, "df", [])) > 30 else f5
+    look = src.lows if d == 1 else src.highs
+    swings = [p for i, p in look if i > len(src.df) - 50 and ((p < mid) if d == 1 else (p > mid))]
+    if swings:
+        anchor = max(swings) if d == 1 else min(swings)
+        struct_dist = abs(entry - anchor) + 0.25 * atr5
     else:
-        struct_dist = 1.5 * atr5
-    min_dist = max(0.8 * atr5, 4 * spread, info.get("stops_level", 0) * info["point"] * 1.3)
-    sl_dist = min_dist if tight else clip(struct_dist, min_dist, 2.0 * atr5)
-    tp_dist, note = 2.0 * sl_dist, "2R default target"
+        struct_dist = 1.6 * atr5
+    min_dist = max(0.85 * atr5, 4 * spread, info.get("stops_level", 0) * info["point"] * 1.3)
+    sl_dist = min_dist if tight else clip(struct_dist, min_dist, 2.4 * atr5)
+    tp_dist, note = 2.2 * sl_dist, "2.2R default target"
     opp = [z for z in zones if (z["kind"] == "resistance" if d == 1 else z["kind"] == "support")
-           and (z["strength"] >= 4.5 or z["touches"] >= 3)]          # only meaningful zones cap the target
+           and (z["strength"] >= 4.0 or z["touches"] >= 3)]
     nearest = None
     for z in opp:
         gap = (z["low"] - entry) if d == 1 else (entry - z["high"])
@@ -52,9 +72,9 @@ def build_plan(d, tick, info, atr5, f5, zones, cfg, tight=False):
             nearest = (gap, z)
     zone_block = False
     if nearest:
-        gap = nearest[0] - 0.1 * atr5
-        if gap >= 1.3 * sl_dist:
-            tp_dist = min(gap, 3.0 * sl_dist)
+        gap = nearest[0] - 0.12 * atr5
+        if gap >= 1.4 * sl_dist:
+            tp_dist = min(gap, 3.2 * sl_dist)
             note = "target before opposing S/R zone"
         else:
             tp_dist, zone_block = max(gap, 0.1 * atr5), True
@@ -71,106 +91,140 @@ def build_plan(d, tick, info, atr5, f5, zones, cfg, tight=False):
 def score_direction(d, c):
     bias, tr = c["bias"], c["trends"]
     f5, f15, f1 = c["frames"]["M5"], c["frames"]["M15"], c["frames"]["M1"]
+    f10 = c["frames"].get("M10") or f5
     r5, r15, r1 = f5.df.iloc[-1], f15.df.iloc[-1], f1.df.iloc[-1]
+    r10 = f10.df.iloc[-1]
     price, atr5 = c["price"], c["atr5"]
     why, pen, comp = [], [], {}
     word = ABBR[d]
 
-    # A. Higher-timeframe alignment (30)
+    # A. Higher-timeframe alignment (34) — Daily and H4 carry the trade
     align = d * bias
-    A = 30 * clip((align + 0.1) / 0.6, 0, 1)
-    if align > 0.2:
-        why.append(f"Top-down bias {word}: D1 {tr['D1']:+.2f}, H4 {tr['H4']:+.2f}, H1 {tr['H1']:+.2f}, M30 {tr['M30']:+.2f}, M15 {tr['M15']:+.2f}")
-    if align < -0.25:
-        A -= 12
-        pen.append("Counter-trend against higher timeframes (-12)")
+    A = 34 * clip((align + 0.05) / 0.55, 0, 1)
+    if align > 0.18:
+        why.append(
+            f"Top-down {word}: D1 {tr.get('D1', 0):+.2f}, H4 {tr.get('H4', 0):+.2f}, "
+            f"H1 {tr.get('H1', 0):+.2f}, M30 {tr.get('M30', 0):+.2f}, M15 {tr.get('M15', 0):+.2f}, "
+            f"M10 {tr.get('M10', 0):+.2f}")
+    if d * tr.get("D1", 0) > 0.12:
+        A += 2
+        why.append(f"Daily chart is {word} — trade with the day, not against it")
+    if d * tr.get("H4", 0) > 0.12:
+        A += 2
+    if align < -0.12:
+        A -= 18
+        pen.append("Counter-trend against Daily/H4/H1 (-18)")
+    A = clip(A, -8, 34)
     comp["htf"] = A
 
-    # B. Setup momentum (20)
-    B = 8 * clip(d * tr["M5"], 0, 1)
+    # B. Setup momentum (16) — H1/M15/M10/M5 must travel the same way
+    B = 5 * clip(d * tr.get("M5", 0), 0, 1) + 3 * clip(d * tr.get("M10", 0), 0, 1)
     rs = float(r5.rsi)
-    if (d == 1 and 45 <= rs <= 68) or (d == -1 and 32 <= rs <= 55):
-        B += 4
+    # Symmetric windows so sells are not easier than buys just because RSI sits near 50
+    if (d == 1 and 42 <= rs <= 68) or (d == -1 and 32 <= rs <= 58):
+        B += 3
         why.append(f"M5 RSI {rs:.0f} has room to run")
-    elif (d == 1 and rs > 75) or (d == -1 and rs < 25):
+    elif (d == 1 and rs > 74) or (d == -1 and rs < 26):
         B -= 6
         pen.append(f"M5 RSI {rs:.0f} exhausted (-6)")
     h, hp = float(r5.macd_hist), float(f5.df.macd_hist.iloc[-2])
     if d * h > 0 and d * (h - hp) > 0:
-        B += 4
+        B += 3
         why.append("M5 MACD momentum accelerating")
-    if r15.adx > 20 and d * (r15.pdi - r15.mdi) > 0:
-        B += 4
+    if r15.adx > 18 and d * (r15.pdi - r15.mdi) > 0:
+        B += 3
         why.append(f"M15 ADX {r15.adx:.0f} confirms trend strength")
+    if d * float(r10.macd_hist) > 0:
+        B += 2
+    B = clip(B, -6, 16)
     comp["momentum"] = B
 
-    # C. Location (20)
-    C, pulled, setup = 0.0, False, None
+    # C. Location (22) — no random mid-range entries
+    C, pulled, setup, located = 0.0, False, None, False
     dist = d * (price - r5.ema20) / atr5
-    if -1.2 <= dist <= 0.35 and d * (price - r5.ema50) > -0.5 * atr5:
-        C += 6
-        pulled = True
+    if -1.3 <= dist <= 0.40 and d * (price - r5.ema50) > -0.6 * atr5:
+        C += 7
+        pulled = located = True
         why.append("Price pulled back to the M5 EMA20/50 value area")
-    elif dist > 1.5:
-        C -= 6
-        pen.append("Price extended away from value - chasing (-6)")
+    elif dist > 1.6:
+        C -= 8
+        pen.append("Price extended away from value - chasing (-8)")
     for z in c["zones"]:
         if ((d == 1 and z["kind"] == "support") or (d == -1 and z["kind"] == "resistance")) and \
-                z["low"] - 0.3 * atr5 <= price <= z["high"] + 0.3 * atr5:
+                z["low"] - 0.35 * atr5 <= price <= z["high"] + 0.35 * atr5:
             C += 8
+            located = True
             why.append(f"At {z['kind']} zone {z['low']:.{c['digits']}f}-{z['high']:.{c['digits']}f} ({'/'.join(z['tfs'])})")
             break
     for ob in c["obs"]:
         if ((d == 1 and ob["type"] == "bullish") or (d == -1 and ob["type"] == "bearish")) and \
                 ob["low"] - 0.3 * atr5 <= price <= ob["high"] + 0.3 * atr5:
             C += 6
+            located = True
             why.append(f"Inside unmitigated {ob['type']} order block")
             break
+    fvg = st.nearest_fvg(c["fvgs"], price, d, atr5)
+    if fvg:
+        C += 5
+        located = True
+        why.append(f"Inside unfilled {fvg['type']} fair value gap")
     bo = c["breakout"]
     if bo["retest"] and bo["retest"]["direction"] == d:
         C += 8
+        located = True
         setup = "BREAKOUT_RETEST"
         why.append("Valid breakout with successful retest")
-    if (d == 1 and price <= r5.bb_lo + 0.15 * atr5) or (d == -1 and price >= r5.bb_up - 0.15 * atr5):
+    if (d == 1 and price <= r5.bb_lo + 0.18 * atr5) or (d == -1 and price >= r5.bb_up - 0.18 * atr5):
         C += 3
+        located = True
         why.append("Price at M5 Bollinger band extreme")
     if d * (price - r5.vwap) > 0:
-        C += 3
+        C += 2
         why.append("Price on the right side of session VWAP")
-    C = clip(C, -10, 20)
+    C = clip(C, -10, 22)
     comp["location"] = C
 
-    # D. M1 trigger (15)
+    # D. Trigger (14) — prefer M10/M5 confirmation over a lone M1 wick
     D, trig = 0.0, None
-    for name, pdir, strength in c["pats1"]:
+    for name, pdir, strength in c.get("pats10", []):
         if pdir == d and 8 * strength > D:
-            D, trig = 8 * strength, f"M1 {name}"
+            D, trig = 8 * strength, f"M10 {name}"
     for name, pdir, strength in c["pats5"]:
-        if pdir == d and 6 * strength > D:
-            D, trig = 6 * strength, f"M5 {name}"
+        if pdir == d and 7 * strength > D:
+            D, trig = 7 * strength, f"M5 {name}"
+    for name, pdir, strength in c["pats1"]:
+        if pdir == d and 5 * strength > D:
+            D, trig = 5 * strength, f"M1 {name}"
     if trig:
         why.append(f"Candlestick trigger: {trig}")
     if d * (r1.close - r1.ema20) > 0 and d * (r1.ema9 - r1.ema20) > 0:
-        D += 3
+        D += 2
         why.append("M1 EMA9/20 aligned with the trade")
+    if d * (r10.close - r10.ema20) > 0:
+        D += 2
+        why.append("M10 close holds on the trade side of EMA20")
     cl = f1.df["close"].values
     if (d == 1 and cl[-1] > f1.df["high"].values[-6:-1].max()) or (d == -1 and cl[-1] < f1.df["low"].values[-6:-1].min()):
-        D += 4
+        D += 3
         why.append("M1 micro break of structure")
     fb = bo["false_breakout"]
     if fb and fb["direction"] == d:
         D += 6
+        located = True
         setup = "FALSE_BREAKOUT_REVERSAL"
         why.append(f"False breakout: {fb['note']}")
-    D = clip(D, 0, 15)
+    D = clip(D, 0, 14)
     comp["trigger"] = D
 
-    # E. Regime (10)
+    # E. Regime (9)
     E = 0.0
-    if 18 <= r15.adx <= 45: E += 5
-    elif r15.adx > 45: E += 2
+    if 18 <= r15.adx <= 45:
+        E += 5
+    elif r15.adx > 45:
+        E += 2
     ratio = float(r5.atr / r5.atr_ma) if r5.atr_ma and not np.isnan(r5.atr_ma) else 1.0
-    if 0.7 <= ratio <= 1.8: E += 5
+    if 0.7 <= ratio <= 1.8:
+        E += 4
     elif ratio > 2.5:
         E -= 8
         pen.append("Volatility spike - unstable conditions (-8)")
@@ -182,44 +236,77 @@ def score_direction(d, c):
     # F. Volume (5)
     F = 0.0
     v1 = float(f1.df.volume.iloc[-3:].mean() / max(r1.vol_ma, 1))
-    if v1 > 1.3: F += 3; why.append(f"M1 tick-volume {v1:.1f}x average")
-    if float(r5.volume / max(r5.vol_ma, 1)) > 1.2: F += 2
+    if v1 > 1.3:
+        F += 3
+        why.append(f"M1 tick-volume {v1:.1f}x average")
+    if float(r5.volume / max(r5.vol_ma, 1)) > 1.2:
+        F += 2
     comp["volume"] = F
 
     if setup is None:
-        setup = "TREND_PULLBACK" if pulled else "MOMENTUM"
+        setup = "TREND_PULLBACK" if pulled else ("ZONE_REVERSAL" if located else "MOMENTUM")
         if setup == "MOMENTUM":
-            pen.append("No pullback/zone confluence (-4)")
-            comp["location"] -= 4
+            pen.append("No pullback, zone, order block or FVG (-6)")
+            comp["location"] = clip(comp["location"] - 6, -10, 22)
     total = sum(comp.values())
-    return total, comp, why, pen, setup
+    return total, comp, why, pen, setup, located
 
 
 def analyze_symbol(symbol, frames, tick, info, zones, cfg, perf, equity, news):
+    frames = dict(frames)
+    if "M5" not in frames:
+        return None
+    if "M15" not in frames:
+        frames["M15"] = frames["M5"]
+    if "M1" not in frames:
+        frames["M1"] = frames["M5"]
+    if "M10" not in frames:
+        frames["M10"] = frames.get("M15") or frames["M5"]
     f5 = frames["M5"]
+    f15 = frames.get("M15") or f5
     atr5 = f5.atr
     price = (tick["ask"] + tick["bid"]) / 2
     trends = {tf: tf_trend(fr) for tf, fr in frames.items()}
-    bias = sum(w * trends[tf] for tf, w in HTF_W.items())
-    obs = frames["M5"].obs + frames["M15"].obs + frames["H1"].obs
-    ctx = dict(frames=frames, trends=trends, bias=bias, price=price, atr5=atr5, zones=zones, obs=obs,
-               pats1=st.candle_patterns(frames["M1"].df), pats5=st.candle_patterns(frames["M5"].df),
+    bias = sum(w * trends.get(tf, 0.0) for tf, w in HTF_W.items())
+    structs = {tf: fr.struct for tf, fr in frames.items()}
+    locked = htf_direction(trends, structs)
+    obs = []
+    for tf in ("M5", "M10", "M15", "H1"):
+        if tf in frames:
+            obs.extend(frames[tf].obs)
+    fvgs = []
+    for tf in ("M5", "M10", "M15"):
+        if tf in frames:
+            fvgs.extend(st.fair_value_gaps(frames[tf].df))
+    ctx = dict(frames=frames, trends=trends, bias=bias, price=price, atr5=atr5, zones=zones, obs=obs, fvgs=fvgs,
+               pats1=st.candle_patterns(frames["M1"].df) if "M1" in frames else [],
+               pats5=st.candle_patterns(f5.df),
+               pats10=st.candle_patterns(frames["M10"].df) if "M10" in frames else [],
                breakout=st.breakout_state(f5.df, zones, atr5), digits=info["digits"])
-    best = None
-    for d in (1, -1):
-        total, comp, why, pen, setup = score_direction(d, ctx)
-        if best is None or total > best[0]:
-            best = (total, comp, why, pen, setup, d)
-    total, comp, why, pen, setup, d = best
 
-    plan = build_plan(d, tick, info, atr5, f5, zones, cfg)
+    scored = []
+    sides = (locked,) if locked else (1, -1)
+    for d in sides:
+        total, comp, why, pen, setup, located = score_direction(d, ctx)
+        scored.append((total, comp, why, pen, setup, located, d))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    total, comp, why, pen, setup, located, d = scored[0]
+    other = scored[1][0] if len(scored) > 1 else None
+
+    # When Daily/H4 do not lock a side, keep the better score for the table but do not trade it.
+    wait_for_htf = locked == 0
+    if wait_for_htf:
+        pen.append("Daily and H4 do not agree — waiting for a clear market direction")
+    elif other is not None and total - other < 6:
+        wait_for_htf = True
+        pen.append("BUY and SELL scores are too close — no edge")
+
+    plan = build_plan(d, tick, info, atr5, f5, zones, cfg, f15=f15)
     account_fix = None
     if symbol in PRIORITY_SYMBOLS:
-        # Priority symbol that the account cannot afford with the normal stop: try the tightest allowed
-        # stop (0.8 x ATR, never below the broker/spread minimum) so the minimum lot fits the risk cap.
         _, _, unaffordable = size_position(equity, plan["sl_dist"], info, cfg)
         if unaffordable:
-            tight = build_plan(d, tick, info, atr5, f5, zones, cfg, tight=True)
+            tight = build_plan(d, tick, info, atr5, f5, zones, cfg, tight=True, f15=f15)
             _, _, still = size_position(equity, tight["sl_dist"], info, cfg)
             if not still and tight["sl_dist"] < plan["sl_dist"]:
                 plan = tight
@@ -238,33 +325,54 @@ def analyze_symbol(symbol, frames, tick, info, zones, cfg, perf, equity, news):
     spread_ratio = spread / plan["sl_dist"]
     blocked_reasons = []
     news_blocked, news_reason = news.blocked(symbol, cfg)
-    # A sell while H4 and H1 are both rising (or a buy while both are falling) is the false
-    # entry that used to get through on M5 noise. Both higher timeframes must not oppose.
-    if d * trends["H4"] < -0.05 and d * trends["H1"] < -0.05:
+    if wait_for_htf:
+        blocked_reasons.append("Blocked: higher timeframes have not chosen a direction yet")
+    if locked and d != locked:
+        blocked_reasons.append(f"Blocked: refusing to fade Daily/H4 ({'BUY' if locked == 1 else 'SELL'} market)")
+    if d * trends.get("H4", 0) < -0.08 and d * trends.get("H1", 0) < -0.08:
         blocked_reasons.append(
-            f"Blocked: H4 {trends['H4']:+.2f} and H1 {trends['H1']:+.2f} both oppose this {plan['side']}")
-    if d * trends["M5"] < -0.15:
-        blocked_reasons.append(f"Blocked: M5 trend {trends['M5']:+.2f} does not agree with this {plan['side']}")
-    if news_blocked: blocked_reasons.append(news_reason)
-    if spread_ratio > cfg.max_spread_to_sl: blocked_reasons.append(f"Spread too wide ({spread_ratio * 100:.0f}% of stop)")
-    if comp["trigger"] < 4: blocked_reasons.append("Waiting for M1 trigger")
-    if setup == "MOMENTUM" and total < cfg.min_score + 8:
-        blocked_reasons.append(f"Momentum-only setup needs score >= {cfg.min_score + 8:.0f}")
-    if total < cfg.min_score: blocked_reasons.append(f"Score {total:.0f} < {cfg.min_score:.0f}")
-    if plan["rr"] < cfg.min_rr: blocked_reasons.append(f"R:R {plan['rr']:.2f} < {cfg.min_rr}")
+            f"Blocked: H4 {trends.get('H4', 0):+.2f} and H1 {trends.get('H1', 0):+.2f} both oppose this {plan['side']}")
+    if d * trends.get("D1", 0) < -0.15 and d * trends.get("H4", 0) < 0:
+        blocked_reasons.append(f"Blocked: Daily trend {trends.get('D1', 0):+.2f} is against this {plan['side']}")
+    if d * trends.get("M5", 0) < -0.20:
+        blocked_reasons.append(f"Blocked: M5 trend {trends.get('M5', 0):+.2f} does not agree with this {plan['side']}")
+    if not located and setup == "MOMENTUM":
+        blocked_reasons.append("Blocked: no pullback / S/R / order-block / FVG location")
+    if news_blocked:
+        blocked_reasons.append(news_reason)
+    if spread_ratio > cfg.max_spread_to_sl:
+        blocked_reasons.append(f"Spread too wide ({spread_ratio * 100:.0f}% of stop)")
+    if comp["trigger"] < 5:
+        blocked_reasons.append("Waiting for M10/M5/M1 trigger")
+    if setup == "MOMENTUM":
+        blocked_reasons.append("Momentum-only chase is not allowed")
+    if total < cfg.min_score:
+        blocked_reasons.append(f"Score {total:.0f} < {cfg.min_score:.0f}")
+    if plan["rr"] < cfg.min_rr:
+        blocked_reasons.append(f"R:R {plan['rr']:.2f} < {cfg.min_rr}")
     lots, risk_amt, why_not = size_position(equity, plan["sl_dist"], info, cfg)
     min_lot_risk = info["volume_min"] * loss_per_lot(plan["sl_dist"], info)
-    if why_not: blocked_reasons.append("Unaffordable: " + why_not)
-    if symbol not in cfg.allowed_symbols: blocked_reasons.append("Symbol disabled in settings")
+    if why_not:
+        blocked_reasons.append("Unaffordable: " + why_not)
+    if symbol not in cfg.allowed_symbols:
+        blocked_reasons.append("Symbol disabled in settings")
     if spread_ratio <= cfg.max_spread_to_sl:
         why.append(f"Spread {spread:.{info['digits']}f} is only {spread_ratio * 100:.0f}% of the stop distance")
     why.append(f"R:R {plan['rr']:.2f} ({plan['note']})")
 
     rank_score = total - 20 * min(spread_ratio, 1.0) - (30 if why_not else 0)
+    show_side = plan["side"] if locked else "WAIT"
+    show_dir = d if locked else 0
+    story = (
+        f"{'BUY' if locked == 1 else 'SELL' if locked == -1 else 'No Daily/H4 lock'} "
+        f"from Daily {trends.get('D1', 0):+.2f} / H4 {trends.get('H4', 0):+.2f} / "
+        f"H1 {trends.get('H1', 0):+.2f}. "
+        + (" ".join(why[:3]) if why else "Waiting for location and trigger.")
+    )
     return {
-        "symbol": symbol, "direction": d, "side": plan["side"], "score": round(total, 1), "rankScore": round(rank_score, 1),
+        "symbol": symbol, "direction": show_dir, "side": show_side, "score": round(total, 1), "rankScore": round(rank_score, 1),
         "setup": setup, "bias": round(bias, 3), "price": f(price, info["digits"]), "spread": f(spread, info["digits"]),
-        "plan": {k: (f(v, info["digits"]) if isinstance(v, float) else v) for k, v in plan.items() if k != "zone_block"},
+        "plan": {k: (f(v, info["digits"]) if isinstance(v, float) else v) for k, v in plan.items() if k != "zone_block"} if locked else None,
         "rr": round(plan["rr"], 2), "lots": lots, "riskAmount": round(risk_amt, 2),
         "riskPctAtMinLot": round(risk_pct_at_min_lot(equity, plan["sl_dist"], info), 2),
         "components": {k: round(v, 1) for k, v in comp.items()}, "reasons": why, "penalties": pen,
@@ -274,4 +382,6 @@ def analyze_symbol(symbol, frames, tick, info, zones, cfg, perf, equity, news):
                           "balanceNeeded": round(min_lot_risk / max(cfg.micro_max_risk_pct, 1e-9) * 100, 2)},
         "tradable": len(blocked_reasons) == 0, "blockedReasons": blocked_reasons,
         "timeframes": {tf: tf_summary(fr) for tf, fr in frames.items()},
+        "htfLock": {1: "BUY", -1: "SELL", 0: "WAIT"}[locked],
+        "story": story,
     }

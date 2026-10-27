@@ -101,13 +101,26 @@ class CandlePainter extends CustomPainter {
       hi = math.max(hi, d(c[2]));
     }
     final plan = data['plan'];
+    void include(double v) {
+      if (v > 0 && v > lo - (hi - lo) * 0.8 && v < hi + (hi - lo) * 0.8) {
+        lo = math.min(lo, v);
+        hi = math.max(hi, v);
+      }
+    }
     if (layers.contains('plan') && plan is Map) {
       for (final k in ['entry', 'sl', 'tp']) {
-        final v = d(plan[k]);
-        if (v > 0 && v > lo - (hi - lo) * 0.6 && v < hi + (hi - lo) * 0.6) {
-          lo = math.min(lo, v);
-          hi = math.max(hi, v);
-        }
+        include(d(plan[k]));
+      }
+    }
+    if (layers.contains('pivots')) {
+      for (final pv in (data['pivots'] as List? ?? [])) {
+        include(d(pv['price']));
+      }
+    }
+    if (layers.contains('session')) {
+      for (final s in (data['sessions'] as List? ?? [])) {
+        include(d(s['high']));
+        include(d(s['low']));
       }
     }
     final padR = (hi - lo) * 0.06;
@@ -201,6 +214,7 @@ class CandlePainter extends CustomPainter {
       _line(canvas, lw, n, xOfIdx, yOf, Colors.indigo.withOpacity(0.5), 1);
     }
     if (layers.contains('ema')) {
+      _line(canvas, _series(ind['ema9']), n, xOfIdx, yOf, const Color(0xFF22D3EE), 1.1);
       _line(canvas, _series(ind['ema20']), n, xOfIdx, yOf, const Color(0xFF3B82F6), 1.4);
       _line(canvas, _series(ind['ema50']), n, xOfIdx, yOf, const Color(0xFFF59E0B), 1.4);
       _line(canvas, _series(ind['ema200']), n, xOfIdx, yOf, const Color(0xFF8B5CF6), 1.6);
@@ -247,6 +261,25 @@ class CandlePainter extends CustomPainter {
         canvas.drawLine(a, Offset(ext.dx.clamp(0, chartW), ext.dy.clamp(topPad, topPad + chartH)), Paint()..color = col..strokeWidth = 2.8..strokeCap = StrokeCap.round);
         canvas.drawCircle(a, 4, Paint()..color = col);
         _text(canvas, sup ? 'Trendline ↗ ${t['touches']}x' : 'Trendline ↘ ${t['touches']}x', b + const Offset(-70, -14), col, 10, bold: true);
+      }
+    }
+    if (layers.contains('pivots')) {
+      for (final pv in (data['pivots'] as List? ?? [])) {
+        final col = pv['kind'] == 'support' ? Palette.green : (pv['kind'] == 'resistance' ? Palette.red : Palette.brand);
+        _hline(canvas, yOf(d(pv['price'])), chartW, col.withOpacity(0.85), pv['label'].toString(), dashed: true, width: 1.0);
+      }
+    }
+    if (layers.contains('session')) {
+      for (final s in (data['sessions'] as List? ?? [])) {
+        _hline(canvas, yOf(d(s['high'])), chartW, const Color(0xFF6366F1), '${s['session']} high', dashed: true, width: 1.0);
+        _hline(canvas, yOf(d(s['low'])), chartW, const Color(0xFF6366F1), '${s['session']} low', dashed: true, width: 1.0);
+      }
+    }
+    if (layers.contains('liq')) {
+      for (final lq in (data['liquidity'] as List? ?? [])) {
+        final eqh = lq['kind'] == 'eqh';
+        _hline(canvas, yOf(d(lq['price'])), chartW, eqh ? Palette.gold : Palette.blue,
+            eqh ? 'EQH liq ${lq['touches']}x' : 'EQL liq ${lq['touches']}x', dashed: true, width: 1.1);
       }
     }
     // ---- markers

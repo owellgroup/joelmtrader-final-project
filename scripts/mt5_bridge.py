@@ -110,7 +110,22 @@ def _resolve_symbol(name):
             base = base[: -len(suffix)]
             break
     alias = "GOLD" if base == "XAUUSD" else ("SILVER" if base == "XAGUSD" else None)
-    for stem in (base, alias):
+    extras = []
+    if base in ("GBPJPY", "EURJPY", "EURUSD", "GBPUSD", "XAUUSD"):
+        extras = [base + s for s in ("m", "M", ".m", ".", "#", ".a", "micro")]
+    for cand in [base, alias, *extras]:
+        if not cand:
+            continue
+        try:
+            info = mt5.symbol_info(cand)
+        except Exception:  # noqa: BLE001
+            info = None
+        if info is not None:
+            pick = getattr(info, "name", cand)
+            mt5.symbol_select(pick, True)
+            print(f"Symbol {name} mapped to {pick}")
+            return pick
+    for stem in (base, alias, *extras):
         if not stem:
             continue
         exact = [s for s in names if s.upper() == stem]

@@ -10,8 +10,19 @@ SYMBOLS = PRIORITY_SYMBOLS + OTHER_SYMBOLS                        # scan order: 
 LEGACY_SYMBOLS = ["XAUUSD", "EURUSD", "GBPUSD"]                   # what older saved settings knew about
 USD_QUOTED = {"XAUUSD", "EURUSD", "GBPUSD"}                       # long = short USD
 JPY_CROSSES = {"GBPJPY", "EURJPY"}                                # long = short JPY
-TIMEFRAMES = ["D1", "H4", "H1", "M30", "M15", "M5", "M1"]
-TF_SECONDS = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800, "H1": 3600, "H4": 14400, "D1": 86400}
+TIMEFRAMES = ["D1", "H4", "H1", "M30", "M15", "M10", "M5", "M1"]
+TF_SECONDS = {"M1": 60, "M5": 300, "M10": 600, "M15": 900, "M30": 1800, "H1": 3600, "H4": 14400, "D1": 86400}
+SYMBOL_ALIASES = {"GOLD": "XAUUSD", "XAU": "XAUUSD", "XAUUSDM": "XAUUSD"}
+UNIVERSE_VERSION = 2                                              # bump when the live symbol list changes
+
+# Broker spellings we try before giving up (Headway, XM, IC Markets, Exness, …)
+BROKER_NAME_TRIES = {
+    "XAUUSD": ["XAUUSD", "GOLD", "XAUUSDm", "XAUUSD.m", "XAUUSD.", "XAUUSD#", "XAUUSD.a", "XAUUSD.pro"],
+    "GBPJPY": ["GBPJPY", "GBPJPYm", "GBPJPY.m", "GBPJPY.", "GBPJPY#", "GBPJPY.a", "GBPJPYmicro", "GBP/JPY"],
+    "EURJPY": ["EURJPY", "EURJPYm", "EURJPY.m", "EURJPY.", "EURJPY#", "EURJPY.a", "EURJPYmicro", "EUR/JPY"],
+    "EURUSD": ["EURUSD", "EURUSDm", "EURUSD.m", "EURUSD.", "EURUSD#", "EURUSD.a", "EURUSDmicro"],
+    "GBPUSD": ["GBPUSD", "GBPUSDm", "GBPUSD.m", "GBPUSD.", "GBPUSD#", "GBPUSD.a", "GBPUSDmicro"],
+}
 
 DATA_DIR = os.getenv("DATA_DIR", "./data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -56,14 +67,15 @@ class RiskConfig:
     max_consecutive_losses: int = 3
     cooldown_minutes: int = 15
     symbol_cooldown_minutes: int = 5
-    min_score: float = 62.0                 # minimum opportunity score (0-100)
-    min_rr: float = 1.5                     # minimum net reward:risk
-    max_spread_to_sl: float = 0.25          # spread must be <= 25% of the stop distance
+    min_score: float = 66.0                 # minimum opportunity score (0-100)
+    min_rr: float = 1.6                     # minimum net reward:risk
+    max_spread_to_sl: float = 0.20          # spread must be <= 20% of the stop distance
     news_before_min: int = 30
     news_after_min: int = 15
-    break_even_r: float = 0.8
-    trail_start_r: float = 1.2
-    max_trade_minutes: int = 45
+    break_even_r: float = 0.6
+    trail_start_r: float = 1.0
+    max_trade_minutes: int = 90
+    universe_version: int = 0               # settings-file migration marker
     trade_start_utc: int = 6
     trade_end_utc: int = 20
     close_before_news: bool = True
@@ -83,6 +95,20 @@ class ConfigStore:
                 self.update(json.load(f), persist=False)
         except Exception:
             pass
+        self._ensure_universe()
+
+    def _ensure_universe(self):
+        """Older saves listed only EURUSD/GBPUSD/XAUUSD, or marked JPY as 'known' then left them off.
+        One migration turns every live symbol back on so GBPJPY and EURJPY are analysed and tradable."""
+        ver = int(getattr(self.cfg, "universe_version", 0) or 0)
+        if ver >= UNIVERSE_VERSION:
+            return
+        allowed = list(self.cfg.allowed_symbols or [])
+        for s in SYMBOLS:
+            if s not in allowed:
+                allowed.append(s)
+        self.update({"allowed_symbols": allowed, "known_symbols": list(SYMBOLS),
+                     "universe_version": UNIVERSE_VERSION}, persist=True)
 
     def update(self, data: dict, persist=True):
         with self._lock:

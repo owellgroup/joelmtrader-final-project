@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from . import structure as st
 from .analyzer import analyze_symbol
 from .config import SYMBOLS, PRIORITY_SYMBOLS, USD_QUOTED, JPY_CROSSES, DATA_DIR, Settings
-from .risk import size_within_budget
+from .risk import lock_floor_r, size_within_budget
 
 log = logging.getLogger("bot")
 
@@ -205,6 +205,9 @@ class Bot:
                 price = (tick["ask"] + tick["bid"]) / 2
                 zones = st.sr_zones(frames, price, frames["H1"].atr)
                 row = analyze_symbol(s, frames, tick, info, zones, cfg, self.perf, equity, self.news)
+                if row is None:
+                    ranks.append(self._pending_rank(s, "Waiting for enough candles on this pair"))
+                    continue
                 if tick.get("stale"):
                     row["tradable"] = False
                     row["blockedReasons"] = ["No live bid/ask yet from the broker"] + list(row.get("blockedReasons") or [])
@@ -240,8 +243,8 @@ class Bot:
             "rr": 0, "lots": 0, "riskAmount": 0, "riskPctAtMinLot": 0,
             "components": {"htf": 0, "momentum": 0, "location": 0, "trigger": 0, "regime": 0, "volume": 0},
             "reasons": [], "penalties": [], "priority": symbol in PRIORITY_SYMBOLS,
-            "accountFix": None, "affordability": None, "tradable": False, "blockedReasons": [reason],
-            "timeframes": {},
+            "accountFix": None,             "affordability": None, "tradable": False, "blockedReasons": [reason],
+            "timeframes": {}, "htfLock": "WAIT", "story": reason,
         }
 
     def _check_priority_affordability(self, ranks, equity):
@@ -376,7 +379,7 @@ class Bot:
         acct["free_margin"] = acct["free_margin"] - margin
         meta = dict(symbol=s, side=cand["side"], entry=res["price"], sl0=sl, risk_dist=sl_dist, open_ts=now,
                     setup=cand["setup"], score=cand["score"], risk_amount=risk_amt, lots=lots, be_done=False,
-                    balance_before=acct["balance"], miss=0)
+                    balance_before=acct["balance"], miss=0, peak_r=0.0, peak_profit=0.0)
         self.tracked[ticket] = meta
         self.stats["opened"] += 1
         self.log_event(f"OPEN {cand['side']} {s} {lots} lots @ {res['price']} SL {sl} TP {tp} (score {cand['score']:.0f}, {cand['setup']})")
@@ -393,7 +396,8 @@ class Bot:
                 rd = abs(p["price_open"] - p["sl"]) if p["sl"] else 0
                 self.tracked[p["ticket"]] = dict(symbol=p["symbol"], side=p["side"], entry=p["price_open"], sl0=p["sl"],
                                                  risk_dist=rd or 1e-9, open_ts=self._now(), setup="ADOPTED", score=0,
-                                                 risk_amount=0, lots=p["volume"], be_done=False, balance_before=0, miss=0)
+                                                 risk_amount=0, lots=p["volume"], be_done=False, balance_before=0, miss=0,
+                                                 peak_r=0.0, peak_profit=max(float(p.get("profit") or 0), 0.0))
 
     def _sync_positions(self):
         live = {p["ticket"]: p for p in self.broker.positions()}
@@ -465,37 +469,62 @@ class Bot:
             price = tick["bid"] if side == 1 else tick["ask"]
             rd = m["risk_dist"]
             r = (price - m["entry"]) * side / rd if rd else 0
+            profit = float(p.get("profit") or 0)
+            m["peak_r"] = max(float(m.get("peak_r") or 0), r)
+            m["peak_profit"] = max(float(m.get("peak_profit") or 0), profit)
             spread = tick["ask"] - tick["bid"]
             minutes = (now - m["open_ts"]) / 60
+            peak = m["peak_r"]
 
             if cfg.close_before_news and self.news.imminent(s, 3, time.time()):
                 self._close(t, "Closed ahead of high-impact news"); continue
             if self.broker.name == "mt5" and u.weekday() == 4 and u.hour >= 21:
                 self._close(t, "Closed before the weekend"); continue
-            if minutes > cfg.max_trade_minutes and r < 0.5:
+            # Time-stop only dead trades. Never dump a winner that already ran (the $4 → $1 case).
+            if minutes > cfg.max_trade_minutes and r < 0.15 and peak < 0.55:
                 self._close(t, f"Time stop after {minutes:.0f} min - no follow-through ({r:+.1f}R)"); continue
-            f1 = self.md.frame(s, "M1")
-            if f1 is not None and r >= 0.4:
-                against = [x for x in st.candle_patterns(f1.df) if x[1] == -side and x[2] >= 0.8]
-                if against and side * float(f1.df.macd_hist.iloc[-1]) < 0:
-                    self._close(t, f"Momentum reversal ({against[0][0]}) - profit secured ({r:+.1f}R)"); continue
+            # Only flatten on a real M15 reversal, and only while the trade has not yet become a runner.
+            f15 = self.md.frame(s, "M15")
+            if f15 is not None and 0.35 <= r < 1.05 and peak < 1.15:
+                against = [x for x in st.candle_patterns(f15.df) if x[1] == -side and x[2] >= 0.8]
+                if against and side * float(f15.df.macd_hist.iloc[-1]) < 0 and side * f15.struct.get("trend", 0) < 0:
+                    self._close(t, f"M15 reversal ({against[0][0]}) - locking {r:+.1f}R"); continue
+
             new_sl = None
-            if r >= cfg.trail_start_r:
-                cand = price - side * 0.7 * rd
-                if (cand - p["sl"]) * side > 0.1 * rd:
-                    new_sl = cand
-            if r >= cfg.break_even_r and not m["be_done"]:
-                be = m["entry"] + side * (spread + 0.1 * rd)
+            floor = lock_floor_r(peak)
+            if floor is not None:
+                locked = m["entry"] + side * floor * rd
+                if (locked - p["sl"]) * side > 0.05 * rd:
+                    new_sl = locked
+                    m["be_done"] = True
+            elif r >= cfg.break_even_r and not m["be_done"]:
+                be = m["entry"] + side * (spread + 0.08 * rd)
                 if (be - p["sl"]) * side > 0:
-                    new_sl = be if new_sl is None or (be - new_sl) * side > 0 else new_sl
+                    new_sl = be
                 m["be_done"] = True
+            # Structure trail: sit behind the latest M5 swing once we are a runner, never looser than the lock.
+            if peak >= cfg.trail_start_r:
+                f5 = self.md.frame(s, "M5")
+                swing = None
+                if f5 is not None:
+                    pts = f5.lows[-3:] if side == 1 else f5.highs[-3:]
+                    if pts:
+                        levels = [px for _, px in pts]
+                        swing = (max(levels) if side == 1 else min(levels)) - side * 0.15 * rd
+                atr_trail = price - side * max(0.45 * rd, 0.8 * (f5.atr if f5 is not None else rd))
+                cand = swing if swing is not None else atr_trail
+                if floor is not None:
+                    floor_px = m["entry"] + side * floor * rd
+                    cand = floor_px if (cand - floor_px) * side < 0 else cand
+                if (cand - (new_sl if new_sl is not None else p["sl"])) * side > 0.08 * rd:
+                    new_sl = cand
             if new_sl is not None:
                 new_sl = round(new_sl, info["digits"])
                 if abs(price - new_sl) >= max(info.get("stops_level", 0) * info["point"], 0) * 1.2:
                     res = self.broker.modify_sltp(t, new_sl, None)
                     if res.get("ok"):
                         m["be_done"] = True
-                        self.log_event(f"#{t} {s}: stop moved to {new_sl} ({r:+.1f}R)")
+                        self.log_event(f"#{t} {s}: profit locked at {new_sl} (now {r:+.1f}R, peak {peak:+.1f}R)")
 
     def _halt(self, reason, day):
         self.log_event(f"HALT: {reason}", "critical")

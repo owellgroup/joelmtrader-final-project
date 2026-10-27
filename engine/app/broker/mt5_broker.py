@@ -12,7 +12,7 @@ import time
 import numpy as np
 import pandas as pd
 
-from ..config import SYMBOLS, Settings
+from ..config import BROKER_NAME_TRIES, SYMBOLS, Settings
 from .base import Broker
 
 log = logging.getLogger("mt5")
@@ -107,27 +107,56 @@ class MT5Broker(Broker):
         except Exception:                               # noqa: BLE001
             return []
 
+    @staticmethod
+    def _norm(name):
+        return "".join(ch for ch in (name or "").upper() if ch.isalnum())
+
+    def _info_named(self, name):
+        if self.mt5 is None or not name:
+            return None
+        try:
+            return self.mt5.symbol_info(name)
+        except Exception:                               # noqa: BLE001
+            return None
+
     def _pick_broker_name(self, canon):
-        """Headway and others use GBPJPYm / EURUSDm. Match the live spelling, not the pretty name."""
+        """Headway and others use GBPJPYm / EURUSDm. Probe live spellings, do not require Market Watch."""
         known = self.symbols.get(canon)
-        if known and known != canon:
-            return known
+        if known:
+            info = self._info_named(known)
+            if info is not None:
+                return getattr(info, "name", known) or known
+        # Direct probes first — symbols_get() is often empty until Market Watch is populated.
+        tries = []
+        if Settings.symbol_suffix:
+            tries.append(canon + Settings.symbol_suffix)
+        tries.extend(BROKER_NAME_TRIES.get(canon, [canon]))
+        tries.append(canon)
+        seen = set()
+        for name in tries:
+            key = name.upper()
+            if key in seen:
+                continue
+            seen.add(key)
+            info = self._info_named(name)
+            if info is not None:
+                return getattr(info, "name", name) or name
         names = self._broker_names()
-        by_upper = {n.upper(): n for n in names}
-        for suf in (Settings.symbol_suffix, "", "m", ".m", "micro", ".a", ".r", ".pro", "_", "#"):
-            hit = by_upper.get((canon + (suf or "")).upper())
+        by_norm = {self._norm(n): n for n in names}
+        want = self._norm(canon)
+        if want in by_norm:
+            return by_norm[want]
+        for suf in (Settings.symbol_suffix, "m", "M", ".m", "micro", ".a", ".r", ".pro", "_", "#", "."):
+            hit = by_norm.get(self._norm(canon + (suf or "")))
             if hit:
                 return hit
-        if canon == "XAUUSD":
-            for alt in ("XAUUSD", "GOLD"):
-                hits = [n for n in names if n.upper().startswith(alt) and not any(ch.isdigit() for ch in n)]
-                if hits:
-                    return sorted(hits, key=len)[0]
-        hits = [n for n in names if n.upper().startswith(canon) and not any(ch.isdigit() for ch in n)]
+        stems = [want] + (["XAUUSD", "GOLD"] if canon == "XAUUSD" else [])
+        hits = [n for n in names if any(self._norm(n).startswith(s) for s in stems)
+                and not any(ch.isdigit() for ch in n)]
         return sorted(hits, key=len)[0] if hits else canon
 
     def _ensure_symbol(self, canon):
-        """Select the broker symbol and wait until bid/ask are real. First select often returns 0."""
+        """Select the broker symbol, wait for bid/ask, and kick history so JPY pairs actually load."""
         name = self._pick_broker_name(canon)
         self.symbols[canon] = name
         if self.mt5 is None:
@@ -138,11 +167,16 @@ class MT5Broker(Broker):
             return name
         if name in self._quote_ready:
             return name
-        deadline = time.time() + 2.5
+        deadline = time.time() + 3.5
         while time.time() <= deadline:
             t = self.mt5.symbol_info_tick(name)
             if t is not None and float(getattr(t, "bid", 0) or 0) > 0 and float(getattr(t, "ask", 0) or 0) > 0:
                 self._quote_ready.add(name)
+                try:
+                    tf = getattr(self.mt5, "TIMEFRAME_H1", 16385)
+                    self.mt5.copy_rates_from_pos(name, tf, 0, 20)
+                except Exception:                       # noqa: BLE001
+                    pass
                 return name
             time.sleep(0.25)
         log.warning("%s (%s) has no live bid/ask yet", canon, name)
@@ -210,7 +244,11 @@ class MT5Broker(Broker):
             name = self._ensure_symbol(symbol)
             i = self.mt5.symbol_info(name)
             if i is None:
-                raise RuntimeError(f"symbol {symbol} not available on this broker")
+                self.symbols.pop(symbol, None)
+                name = self._ensure_symbol(symbol)
+                i = self.mt5.symbol_info(name)
+            if i is None:
+                raise RuntimeError(f"symbol {symbol} not available on this broker (tried {name})")
             info = dict(symbol=name, digits=i.digits, point=i.point,
                         tick_size=i.trade_tick_size or i.point, tick_value=i.trade_tick_value,
                         contract_size=i.trade_contract_size, volume_min=i.volume_min, volume_max=i.volume_max,
@@ -233,25 +271,52 @@ class MT5Broker(Broker):
             self._ticks[symbol] = (time.time(), snap)
             return snap
 
+    def _tf_const(self, tf):
+        m = self.mt5
+        table = {"M1": "TIMEFRAME_M1", "M5": "TIMEFRAME_M5", "M10": "TIMEFRAME_M10",
+                 "M15": "TIMEFRAME_M15", "M30": "TIMEFRAME_M30", "H1": "TIMEFRAME_H1",
+                 "H4": "TIMEFRAME_H4", "D1": "TIMEFRAME_D1"}
+        return getattr(m, table[tf], None)
+
     def rates(self, symbol, tf, count):
+        empty = pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])
         m = self.mt5
         if m is None:
-            return pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])
-        self._ensure_symbol(symbol)
-        tfm = {"M1": m.TIMEFRAME_M1, "M5": m.TIMEFRAME_M5, "M15": m.TIMEFRAME_M15, "M30": m.TIMEFRAME_M30,
-               "H1": m.TIMEFRAME_H1, "H4": m.TIMEFRAME_H4, "D1": m.TIMEFRAME_D1}[tf]
-        with self.lock:
-            arr = m.copy_rates_from_pos(self.sym(symbol), tfm, 0, count)
+            return empty
+        name = self._ensure_symbol(symbol)
+        tfm = self._tf_const(tf)
+        if tfm is None:
+            return empty
+        arr = None
+        for attempt in range(3):
+            with self.lock:
+                try:
+                    arr = m.copy_rates_from_pos(name, tfm, 0, count)
+                except Exception:                       # noqa: BLE001
+                    arr = None
+            if arr is not None and len(arr) > 0:
+                break
+            try:
+                m.symbol_select(name, True)
+            except Exception:                           # noqa: BLE001
+                pass
+            time.sleep(0.35)
         if arr is None or len(arr) == 0:
-            return pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])
+            return empty
         df = pd.DataFrame(arr)
         df = df.rename(columns={"tick_volume": "volume"})
+        if "volume" not in df.columns:
+            df["volume"] = 1.0
         return df[["time", "open", "high", "low", "close", "volume"]].astype(
             {"time": "int64", "open": float, "high": float, "low": float, "close": float, "volume": float})
 
     def _canon(self, name):
         for k, v in self.symbols.items():
-            if v == name:
+            if v == name or self._norm(v) == self._norm(name):
+                return k
+        stem = self._norm(name)
+        for k in SYMBOLS:
+            if stem.startswith(self._norm(k)):
                 return k
         return name
 

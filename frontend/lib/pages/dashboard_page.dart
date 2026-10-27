@@ -351,8 +351,8 @@ class _RankingCard extends StatelessWidget {
 
   static const symbols = ['XAUUSD', 'GBPJPY', 'EURJPY', 'EURUSD', 'GBPUSD'];
   static const priority = {'XAUUSD', 'GBPJPY', 'EURJPY'};
-  static const labels = {'htf': 'Higher TF', 'momentum': 'Momentum', 'location': 'Location', 'trigger': 'M1 trigger', 'regime': 'Regime', 'volume': 'Volume'};
-  static const maxes = {'htf': 30.0, 'momentum': 20.0, 'location': 20.0, 'trigger': 15.0, 'regime': 10.0, 'volume': 5.0};
+  static const labels = {'htf': 'Higher TF', 'momentum': 'Momentum', 'location': 'Location', 'trigger': 'M10/M5 trigger', 'regime': 'Regime', 'volume': 'Volume'};
+  static const maxes = {'htf': 34.0, 'momentum': 16.0, 'location': 22.0, 'trigger': 14.0, 'regime': 9.0, 'volume': 5.0};
 
   static List<Map<String, dynamic>> _rows(Map<String, dynamic>? scan) {
     final incoming = <String, Map<String, dynamic>>{};
@@ -385,7 +385,7 @@ class _RankingCard extends StatelessWidget {
     final chosen = scan?['chosen']?.toString();
     return AppCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const SectionTitle('Opportunity ranking', subtitle: 'All 5 symbols scored (gold, GBPJPY, EURJPY first) across D1 · H4 · H1 · M30 · M15 · M5 · M1'),
+        const SectionTitle('Opportunity ranking', subtitle: 'All 5 symbols scored (gold, GBPJPY, EURJPY first) across D1 · H4 · H1 · M30 · M15 · M10 · M5 · M1'),
         if (ranks.isEmpty)
           const EmptyState(icon: Icons.radar_rounded, title: 'Waiting for market data', message: 'Connect your MT5 account in Settings (or use paper mode).')
         else ...[
@@ -436,6 +436,7 @@ class _RankRow extends StatelessWidget {
           title: Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
             Text(r['symbol'].toString(), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
             Tag(r['side']?.toString() ?? 'WAIT', r['side'] == 'WAIT' ? Palette.slate : (buy ? Palette.green : Palette.red)),
+            if (r['htfLock'] != null && r['htfLock'] != 'WAIT') Tag('HTF ${r['htfLock']}', Palette.brand),
             if (r['priority'] == true) const Tag('PRIORITY', Palette.gold),
             if (selected) const Tag('SELECTED', Palette.brand),
             Text(r['side'] == 'WAIT' ? '—' : score.toStringAsFixed(0), style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20, color: barColor)),

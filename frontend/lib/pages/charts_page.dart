@@ -17,10 +17,10 @@ class ChartsPage extends StatefulWidget {
 
 class _ChartsPageState extends State<ChartsPage> {
   static const symbols = ['XAUUSD', 'GBPJPY', 'EURJPY', 'EURUSD', 'GBPUSD'];
-  static const tfs = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'];
-  static const tfLabel = {'M1': '1m', 'M5': '5m', 'M15': '15m', 'M30': '30m', 'H1': '1H', 'H4': '4H', 'D1': 'D'};
+  static const tfs = ['M1', 'M5', 'M10', 'M15', 'M30', 'H1', 'H4', 'D1'];
+  static const tfLabel = {'M1': '1m', 'M5': '5m', 'M10': '10m', 'M15': '15m', 'M30': '30m', 'H1': '1H', 'H4': '4H', 'D1': 'D'};
   static const layerNames = {
-    'ema': 'EMA 20/50/200',
+    'ema': 'EMA 9/20/50/200',
     'bb': 'Bollinger',
     'vwap': 'VWAP',
     'zones': 'S/R zones',
@@ -28,10 +28,13 @@ class _ChartsPageState extends State<ChartsPage> {
     'ob': 'Order blocks',
     'fvg': 'Fair value gaps',
     'swings': 'Swings',
+    'pivots': 'Daily pivots',
+    'session': 'Session highs / lows',
+    'liq': 'Equal highs / lows',
     'plan': 'Entry / SL / TP',
   };
   String _symbol = 'XAUUSD', _tf = 'M5';
-  final Set<String> _layers = {'ema', 'zones', 'trend', 'ob', 'plan', 'swings'};
+  final Set<String> _layers = {'ema', 'zones', 'trend', 'ob', 'plan', 'swings', 'pivots', 'session'};
   Map<String, dynamic>? _data;
   Map<String, dynamic>? _rank;
   String? _error;
@@ -152,7 +155,9 @@ class _ChartsPageState extends State<ChartsPage> {
                     ? Center(child: ErrorBanner(_error!, onRetry: _load))
                     : data == null
                         ? const Center(child: CircularProgressIndicator(color: Palette.brand))
-                        : _ChartBoard(key: ValueKey('$_symbol|$_tf'), data: data, layers: _layers, dark: context.isDark),
+                        : (data['error'] != null && ((data['candles'] as List?) ?? const []).length < 5)
+                            ? Center(child: ErrorBanner(data['error'].toString(), onRetry: _load))
+                            : _ChartBoard(key: ValueKey('$_symbol|$_tf'), data: data, layers: _layers, dark: context.isDark),
               ),
             ]),
           ),
@@ -229,20 +234,42 @@ class _ChartsPageState extends State<ChartsPage> {
   Widget _analysisPanel(BuildContext context, Map<String, dynamic> data) {
     final st = Map<String, dynamic>.from(data['structure'] ?? {});
     final plan = data['plan'];
+    final analysis = Map<String, dynamic>.from(data['analysis'] ?? {});
+    final stack = Map<String, dynamic>.from(analysis['stack'] ?? {});
     final r = _rank;
     final digits = i(data['digits'], 5);
     return ResponsiveGrid(minTileWidth: 320, children: [
       AppCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          SectionTitle('${data['symbol']} · $_tf structure'),
+          SectionTitle('${data['symbol']} · top-down read'),
+          if ((analysis['story'] ?? '').toString().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(analysis['story'].toString(), style: const TextStyle(fontSize: 12.5, height: 1.35)),
+            ),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            for (final tf in ['D1', 'H4', 'H1', 'M30', 'M15', 'M10', 'M5', 'M1'])
+              if (stack[tf] is Map)
+                Tag(
+                  '$tf ${_tfArrow(stack[tf])}',
+                  d(stack[tf]['trend']) > 0.05 ? Palette.green : (d(stack[tf]['trend']) < -0.05 ? Palette.red : Palette.slate),
+                ),
+          ]),
+          const SizedBox(height: 8),
           _kv('Market structure', st['label']?.toString() ?? '-'),
           _kv('Break of structure', st['bos']?.toString() ?? 'none'),
           _kv('Change of character', st['choch']?.toString() ?? 'none'),
-          _kv('Trendlines', '${(data['trendlines'] as List).length} active'),
-          _kv('S/R zones', '${(data['zones'] as List).length}'),
-          _kv('Order blocks', '${(data['orderBlocks'] as List).length}'),
-          _kv('Fair value gaps', '${(data['fvgs'] as List).length}'),
-          for (final m in (data['markers'] as List)) _kv('Signal', m['label'].toString()),
+          _kv('Daily / H4 lock', analysis['htfLock']?.toString() ?? 'WAIT'),
+          _kv('Trendlines', '${(data['trendlines'] as List? ?? const []).length} active'),
+          _kv('S/R zones', '${(data['zones'] as List? ?? const []).length}'),
+          _kv('Order blocks', '${(data['orderBlocks'] as List? ?? const []).length}'),
+          _kv('Fair value gaps', '${(data['fvgs'] as List? ?? const []).length}'),
+          _kv('Pivots', '${(data['pivots'] as List? ?? const []).length}'),
+          _kv('Session levels', '${(data['sessions'] as List? ?? const []).length}'),
+          _kv('Liquidity pools', '${(data['liquidity'] as List? ?? const []).length}'),
+          for (final m in (data['markers'] as List? ?? const [])) _kv('Signal', m['label'].toString()),
+          for (final t in (analysis['tools'] as List? ?? const []).take(6))
+            Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Text('• $t', style: const TextStyle(fontSize: 12))),
         ]),
       ),
       AppCard(
@@ -252,9 +279,10 @@ class _ChartsPageState extends State<ChartsPage> {
             Text('No scan data yet.', style: TextStyle(color: context.muted))
           else ...[
             Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-              Tag(r['side'].toString(), r['side'] == 'BUY' ? Palette.green : Palette.red),
+              Tag(r['side'].toString(), r['side'] == 'BUY' ? Palette.green : (r['side'] == 'SELL' ? Palette.red : Palette.slate)),
               Text('Score ${d(r['score']).toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
               Tag(r['tradable'] == true ? 'READY' : 'WAITING', r['tradable'] == true ? Palette.green : Palette.gold),
+              if (r['htfLock'] != null) Tag('HTF ${r['htfLock']}', Palette.brand),
             ]),
             const SizedBox(height: 10),
             if (plan is Map) ...[
@@ -264,12 +292,19 @@ class _ChartsPageState extends State<ChartsPage> {
               _kv('Reward : risk', '${plan['rr']}'),
             ],
             const SizedBox(height: 6),
-            for (final x in (r['reasons'] as List).take(5)) Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Text('✓ $x', style: const TextStyle(fontSize: 12))),
-            for (final x in (r['blockedReasons'] as List)) Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Text('✗ $x', style: const TextStyle(fontSize: 12, color: Palette.red))),
+            for (final x in (r['reasons'] as List? ?? const []).take(6)) Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Text('✓ $x', style: const TextStyle(fontSize: 12))),
+            for (final x in (r['blockedReasons'] as List? ?? const [])) Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Text('✗ $x', style: const TextStyle(fontSize: 12, color: Palette.red))),
           ],
         ]),
       ),
     ]);
+  }
+
+  String _tfArrow(dynamic row) {
+    final trend = d(row is Map ? row['trend'] : 0);
+    if (trend > 0.08) return '↑';
+    if (trend < -0.08) return '↓';
+    return '→';
   }
 
   Widget _kv(String k, String v) => Padding(

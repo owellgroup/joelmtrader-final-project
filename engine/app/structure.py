@@ -68,7 +68,7 @@ def cluster_zones(points, tol, min_width):
 
 def sr_zones(frames: dict, price: float, ref_atr: float, max_each=4):
     """frames: tf -> Frame (with .highs, .lows). Builds multi-timeframe S/R zones."""
-    weights = {"D1": 3.0, "H4": 2.5, "H1": 2.0, "M30": 1.5, "M15": 1.0}
+    weights = {"D1": 3.0, "H4": 2.5, "H1": 2.0, "M30": 1.5, "M15": 1.0, "M10": 0.8}
     pts = []
     for tf, w in weights.items():
         f = frames.get(tf)
@@ -269,3 +269,74 @@ def breakout_state(df: pd.DataFrame, zones, atr_v):
             if l[last] <= z["high"] + 0.3 * atr_v and c[last] > z["high"]:
                 res["retest"] = {"direction": 1, "zone": z}
     return res
+
+
+# ---------------------------------------------------------------- session / pivots / liquidity
+def classic_pivots(df):
+    """Yesterday's floor-trader pivots from the last completed bar of a higher-TF series."""
+    if df is None or len(df) < 3:
+        return []
+    row = df.iloc[-2]
+    high, low, close = float(row["high"]), float(row["low"]), float(row["close"])
+    p = (high + low + close) / 3
+    r1, s1 = 2 * p - low, 2 * p - high
+    r2, s2 = p + (high - low), p - (high - low)
+    return [
+        {"kind": "pivot", "label": "P", "price": p},
+        {"kind": "resistance", "label": "R1", "price": r1},
+        {"kind": "support", "label": "S1", "price": s1},
+        {"kind": "resistance", "label": "R2", "price": r2},
+        {"kind": "support", "label": "S2", "price": s2},
+    ]
+
+
+def session_levels(df):
+    """Asia / London / New York session high-low for the current UTC day."""
+    if df is None or len(df) < 20:
+        return []
+    t = pd.to_datetime(df["time"], unit="s", utc=True)
+    work = df.assign(_h=t.dt.hour, _d=t.dt.date)
+    day = work[work["_d"] == work["_d"].iloc[-1]]
+    out = []
+    for name, a, b in (("Asia", 0, 8), ("London", 7, 16), ("New York", 13, 21)):
+        part = day[(day["_h"] >= a) & (day["_h"] < b)]
+        if part.empty:
+            continue
+        out.append({"session": name, "high": float(part["high"].max()), "low": float(part["low"].min()),
+                    "kind": "session"})
+    return out
+
+
+def equal_swings(highs, lows, atr_v, tol=0.18):
+    """Equal highs / equal lows = liquidity pools that professionals fade or hunt."""
+    if atr_v <= 0:
+        return []
+    out = []
+    for kind, pts in (("eqh", highs[-8:]), ("eql", lows[-8:])):
+        used = set()
+        for i, (_ia, pa) in enumerate(pts):
+            if i in used:
+                continue
+            cluster = [pa]
+            for j, (_ib, pb) in enumerate(pts):
+                if j <= i:
+                    continue
+                if abs(pb - pa) <= tol * atr_v:
+                    cluster.append(pb)
+                    used.add(j)
+            if len(cluster) >= 2:
+                out.append({"kind": kind, "price": sum(cluster) / len(cluster), "touches": len(cluster)})
+    return out
+
+
+def nearest_fvg(fvgs, price, direction, atr_v):
+    """Unfilled FVG in the trade direction that price is sitting in or just left."""
+    if not fvgs or atr_v <= 0:
+        return None
+    want = "bullish" if direction == 1 else "bearish"
+    for g in reversed(fvgs):
+        if g["type"] != want:
+            continue
+        if g["low"] - 0.35 * atr_v <= price <= g["high"] + 0.35 * atr_v:
+            return g
+    return None

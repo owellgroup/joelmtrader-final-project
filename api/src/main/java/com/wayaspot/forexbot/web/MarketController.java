@@ -31,8 +31,12 @@ public class MarketController {
     @GetMapping("/analysis/{symbol}")
     public JsonNode analysis(@PathVariable String symbol, @RequestParam(defaultValue = "M5") String tf,
                              @RequestParam(defaultValue = "150") int bars) {
-        if (!symbol.matches("[A-Za-z]{6}") || !tf.matches("[A-Z0-9]{2,3}")) throw new IllegalArgumentException("bad symbol/timeframe");
-        return engine.get("/analysis/" + symbol.toUpperCase() + "?tf=" + tf + "&bars=" + bars);
+        String canon = symbol == null ? "" : symbol.replace("/", "").replace(".", "").replace("-", "").toUpperCase();
+        if (canon.equals("GOLD") || canon.equals("XAU")) canon = "XAUUSD";
+        String timeframe = tf == null ? "M5" : tf.toUpperCase();
+        if (!canon.matches("[A-Z]{6}") || !timeframe.matches("M1|M5|M10|M15|M30|H1|H4|D1"))
+            throw new IllegalArgumentException("unsupported symbol/timeframe — use XAUUSD, GBPJPY, EURJPY, EURUSD or GBPUSD");
+        return engine.get("/analysis/" + canon + "?tf=" + timeframe + "&bars=" + bars);
     }
 
     @GetMapping("/news")

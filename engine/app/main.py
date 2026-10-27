@@ -10,7 +10,7 @@ from .bot import Bot
 from .broker.mt5_link import hub
 from .broker import get_broker
 from .charts import chart_payload
-from .config import SYMBOLS, TIMEFRAMES, Settings, config_store
+from .config import SYMBOL_ALIASES, SYMBOLS, TIMEFRAMES, Settings, config_store
 from .marketdata import MarketData
 from .news import News
 from .reporter import Reporter
@@ -164,11 +164,25 @@ def scan_now():
     return bot.force_scan()
 
 
+def _canon_symbol(symbol: str) -> str:
+    raw = (symbol or "").upper().replace("/", "").replace(".", "").replace("-", "").replace(" ", "")
+    return SYMBOL_ALIASES.get(raw, raw)
+
+
+def _canon_tf(tf: str) -> str:
+    raw = (tf or "M5").upper()
+    return {"1": "M1", "5": "M5", "10": "M10", "15": "M15", "30": "M30", "60": "H1",
+            "1H": "H1", "4H": "H4", "1D": "D1", "D": "D1"}.get(raw, raw)
+
+
 @router.get("/analysis/{symbol}")
 def analysis(symbol: str, tf: str = "M5", bars: int = 150):
-    symbol = symbol.upper()
-    if symbol not in SYMBOLS or tf not in TIMEFRAMES:
-        raise HTTPException(400, "unsupported symbol/timeframe")
+    symbol = _canon_symbol(symbol)
+    tf = _canon_tf(tf)
+    if symbol not in SYMBOLS:
+        raise HTTPException(400, f"unsupported symbol {symbol}. Use {', '.join(SYMBOLS)}")
+    if tf not in TIMEFRAMES:
+        raise HTTPException(400, f"unsupported timeframe {tf}. Use {', '.join(TIMEFRAMES)}")
     return chart_payload(symbol, tf, max(50, min(bars, 300)), md, broker, bot.scan_data)
 
 

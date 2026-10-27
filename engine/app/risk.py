@@ -49,3 +49,24 @@ def size_within_budget(equity: float, sl_dist: float, info: dict, cfg, budget: f
 
 def risk_pct_at_min_lot(equity: float, sl_dist: float, info: dict) -> float:
     return info["volume_min"] * loss_per_lot(sl_dist, info) / max(equity, 1e-9) * 100
+
+
+def lock_floor_r(peak_r: float):
+    """Once a trade has run, never give the bulk of that profit back.
+
+    A $4 runner that retraces to $1 is the failure this prevents: after +2R we lock
+    about 70% of the peak, so the stop sits near +1.4R instead of back at entry.
+    """
+    if peak_r >= 3.0:
+        return peak_r - 0.50
+    if peak_r >= 2.2:
+        return max(1.60, peak_r * 0.72)
+    if peak_r >= 1.6:
+        return max(1.10, peak_r * 0.68)
+    if peak_r >= 1.15:
+        return max(0.70, peak_r * 0.60)
+    if peak_r >= 0.80:
+        return max(0.15, peak_r * 0.45)
+    if peak_r >= 0.55:
+        return 0.05
+    return None

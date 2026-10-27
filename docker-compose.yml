@@ -7,8 +7,6 @@
 #
 # After push: Redeploy / Rebuild in Dokploy. You should see api, engine, web.
 
-version: "3.8"
-
 services:
   engine:
     build:

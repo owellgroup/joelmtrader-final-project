@@ -7,7 +7,7 @@ COPY pubspec.yaml pubspec.lock* analysis_options.yaml ./
 COPY assets ./assets
 COPY lib ./lib
 COPY web ./web
-COPY test ./test
+# Do not COPY test/ — it is not needed for the release web build and may be dockerignored.
 RUN flutter pub get
 ARG API_URL=http://145.241.187.174:8088
 ARG BUILD_ID=2026-10-27-jpy-fix

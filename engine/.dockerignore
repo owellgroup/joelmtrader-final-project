@@ -1,0 +1,13 @@
+__pycache__
+*.pyc
+.pytest_cache
+.idea
+.git
+.gitignore
+*.md
+.env
+.env.*
+_testdata
+data
+*.json
+!requirements.txt

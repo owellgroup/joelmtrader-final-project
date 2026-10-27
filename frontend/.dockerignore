@@ -2,3 +2,14 @@
 build
 .idea
 *.iml
+.git
+.gitignore
+android
+ios
+macos
+windows
+linux
+test
+*.md
+.env
+.env.*

@@ -1,15 +1,54 @@
-# One command deploys the whole system. A .env file is optional.
-# Without it, the values below are used (database, mail, keys, MT5).
+# Dokploy Compose app — path must be: ./docker-compose.yml  (repo root)
 #
-#   cd backend
-#   docker compose up -d --build
+# Dokploy rules this file follows:
+#   - NO container_name (breaks Dokploy UI / logs / metrics)
+#   - every service joins external network dokploy-network
+#   - service names stay: api, engine, web  (used by nginx + ENGINE_URL)
 #
-# Flutter talks only to the Java API. The API talks to the Python engine.
-# The Python engine talks to the MT5 desktop on a Windows PC (not a container).
+# After push: Redeploy / Rebuild in Dokploy. You should see api, engine, web.
+
+version: "3.8"
+
 services:
+  engine:
+    build:
+      context: ./engine
+      dockerfile: Dockerfile
+      args:
+        BUILD_ID: ${BUILD_ID:-2026-10-27-jpy-fix}
+    restart: unless-stopped
+    environment:
+      BROKER_MODE: ${BROKER_MODE:-mt5}
+      ENGINE_API_KEY: ${ENGINE_API_KEY:-a293bc338ba95dbd8bcfb55aa4ab99a13f51351f712d034c}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-f262fe05a3c754a7aa5f5457ad3b4f5fabfe9487fb2b4adc}
+      JAVA_EVENTS_URL: http://api:8080/internal/events
+      MT5_RPYC_HOST: ${MT5_RPYC_HOST:-}
+      MT5_RPYC_PORT: ${MT5_RPYC_PORT:-18812}
+      MAGIC_NUMBER: ${MAGIC_NUMBER:-26101801}
+      SYMBOL_SUFFIX: ${SYMBOL_SUFFIX:-}
+      PAPER_BALANCE: ${PAPER_BALANCE:-12}
+      PAPER_SPEED: ${PAPER_SPEED:-1}
+      DATA_DIR: /data
+    volumes:
+      - engine-data:/data
+    expose:
+      - "8000"
+    networks:
+      - dokploy-network
+      - default
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   api:
-    build: ./api
-    container_name: forexbot-api
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+      args:
+        BUILD_ID: ${BUILD_ID:-2026-10-27-jpy-fix}
     restart: unless-stopped
     environment:
       DB_URL: ${DB_URL:-jdbc:postgresql://84.8.131.140:5432/forex2?prepareThreshold=0}
@@ -36,47 +75,45 @@ services:
       FCM_CLIENT_EMAIL: ${FCM_CLIENT_EMAIL:-}
       FCM_PRIVATE_KEY: ${FCM_PRIVATE_KEY:-}
     ports:
-      - "8080:8080"
+      - "${API_PORT:-8080}:8080"
     depends_on:
       - engine
+    networks:
+      - dokploy-network
+      - default
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 8
+      start_period: 90s
 
-  engine:
-    build: ./engine
-    container_name: forexbot-engine
-    restart: unless-stopped
-    environment:
-      BROKER_MODE: ${BROKER_MODE:-mt5}
-      ENGINE_API_KEY: ${ENGINE_API_KEY:-a293bc338ba95dbd8bcfb55aa4ab99a13f51351f712d034c}
-      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-f262fe05a3c754a7aa5f5457ad3b4f5fabfe9487fb2b4adc}
-      JAVA_EVENTS_URL: http://api:8080/internal/events
-      # Public IP of the Windows PC running the MT5 desktop and the bridge.
-      # Set this in Dokploy. Example: MT5_RPYC_HOST=203.0.113.10
-      MT5_RPYC_HOST: ${MT5_RPYC_HOST:-}
-      MT5_RPYC_PORT: ${MT5_RPYC_PORT:-18812}
-      MAGIC_NUMBER: ${MAGIC_NUMBER:-26101801}
-      SYMBOL_SUFFIX: ${SYMBOL_SUFFIX:-}
-      PAPER_BALANCE: ${PAPER_BALANCE:-12}
-      PAPER_SPEED: ${PAPER_SPEED:-1}
-      DATA_DIR: /data
-    volumes:
-      - engine-data:/data
-    expose:
-      - "8000"
-
-  # Flutter web control panel. Host port 80 belongs to Dokploy, so the site is on 8088.
-  # Nginx inside this container proxies /api to the Java API.
   web:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        API_URL: http://145.241.187.174:8088
-    container_name: forexbot-web
+        API_URL: ${PUBLIC_API_URL:-http://145.241.187.174:8088}
+        BUILD_ID: ${BUILD_ID:-2026-10-27-jpy-fix}
     restart: unless-stopped
     ports:
-      - "8088:80"
+      - "${WEB_PORT:-8088}:80"
     depends_on:
       - api
+    networks:
+      - dokploy-network
+      - default
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 volumes:
   engine-data:
+
+networks:
+  dokploy-network:
+    external: true
+  default:

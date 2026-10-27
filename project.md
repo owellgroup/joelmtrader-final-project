@@ -18,6 +18,17 @@ The app already runs on the server `145.241.187.174`. This Windows PC only runs 
 
 ## 1. Before you deploy
 
+In Dokploy create a **Compose** service (Docker Compose), not a single Dockerfile app.
+
+| Dokploy field | Value |
+|---|---|
+| Compose Type | Docker Compose |
+| Repository | this GitHub repo |
+| Branch | `master` |
+| Compose Path | `./docker-compose.yml` |
+
+Do **not** use `backend/docker-compose.yml` — that path does not exist. Do **not** put `container_name` back in the compose file (Dokploy will hide the services).
+
 In Dokploy, set only the rows that differ from the defaults. The compose file already fills the rest.
 
 | Variable | Set it to |
@@ -30,7 +41,7 @@ In Dokploy, set only the rows that differ from the defaults. The compose file al
 
 Leave `MT5_LOGIN`, `MT5_PASSWORD`, and `MT5_SERVER` empty. You type those in the app after deploy.
 
-Deploy these three containers: `forexbot-api`, `forexbot-engine`, `forexbot-web`. There is no MT5 container.
+After **Deploy / Rebuild**, Dokploy should list three services: `api`, `engine`, `web`. There is no MT5 container.
 
 If Connect MT5 later mentions a host named `mt5`, port `8001`, or port `18812`, the server is on an old build. Redeploy the engine and the web container, then continue.
 

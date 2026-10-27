@@ -146,9 +146,11 @@ and `JAVA_EVENTS_URL` stays `http://localhost:8080/internal/events` because the 
 
 ## 4. Deploy with Docker on Dokploy (your server)
 
-Push the `backend` folder to a Git repo (private!). In Dokploy create a **Compose** project pointing to
-`backend/docker-compose.yml`, and add the variables from `.env.example` in the **Environment** tab. Add a **domain**
-(e.g. `api.yourdomain.com` → service `api`, port `8080`, HTTPS on). Deploy.
+Push this repo to GitHub. In Dokploy create a **Compose** project (Compose Type = Docker Compose) with
+**Compose Path** `./docker-compose.yml` at the repo root. Add the variables from `.env.example` in the
+**Environment** tab. Do not set `container_name` in compose (Dokploy cannot list those containers). Deploy /
+Rebuild until you see services `api`, `engine`, and `web`. Add a **domain** if you want
+(e.g. `api.yourdomain.com` → service `api`, port `8080`, HTTPS on).
 
 Postgres: the compose file uses your external DB (`DB_URL`…). To use a Dokploy-managed Postgres instead, create it in
 Dokploy and point `DB_URL` at its internal host.

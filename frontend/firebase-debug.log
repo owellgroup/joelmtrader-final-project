@@ -1,0 +1,68 @@
+[debug] [2026-10-27T10:49:35.625Z] ----------------------------------------------------------------------
+[debug] [2026-10-27T10:49:35.638Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\Joel Chipoya\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js init hosting
+[debug] [2026-10-27T10:49:35.639Z] CLI Version:   15.34.0
+[debug] [2026-10-27T10:49:35.639Z] Platform:      win32
+[debug] [2026-10-27T10:49:35.639Z] Node Version:  v24.22.0
+[debug] [2026-10-27T10:49:35.639Z] Detected Agent: unknown
+[debug] [2026-10-27T10:49:35.639Z] Time:          Tue Oct 27 2026 12:49:35 GMT+0200 (Central Africa Time)
+[debug] [2026-10-27T10:49:35.640Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-10-27T10:49:35.671Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-10-27T10:50:06.535Z] Object "" in "firebase.json" has unknown property: {"additionalProperty":"flutter"}
+[debug] [2026-10-27T10:50:06.546Z] Object "" in "firebase.json" has unknown property: {"additionalProperty":"flutter"}
+[info] 
+     ######## #### ########  ######## ########     ###     ######  ########
+     ##        ##  ##     ## ##       ##     ##  ##   ##  ##       ##
+     ######    ##  ########  ######   ########  #########  ######  ######
+     ##        ##  ##    ##  ##       ##     ## ##     ##       ## ##
+     ##       #### ##     ## ######## ########  ##     ##  ######  ########
+
+You're about to initialize a Firebase project in this directory:
+
+  C:\joelmtrader-final-project\frontend
+
+Before we get started, keep in mind:
+
+  * You are currently outside your home directory
+  * You are initializing within an existing Firebase project directory
+
+[debug] [2026-10-27T10:50:07.253Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 200
+[debug] [2026-10-27T10:50:07.253Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json {"cloudBuildErrorAfter":1594252800000,"cloudBuildWarnAfter":1590019200000,"defaultNode10After":1594252800000,"minVersion":"3.0.5","node8DeploysDisabledAfter":1613390400000,"node8RuntimeDisabledAfter":1615809600000,"node8WarnAfter":1600128000000}
+[info] 
+=== Project Setup
+[info] 
+[info] First, let's associate this project directory with a Firebase project.
+[info] You can create multiple project aliases by running firebase use --add, 
+[info] 
+[debug] [2026-10-27T10:50:39.768Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-10-27T10:50:39.768Z] > authorizing via signed-in user (owellgraphics23@gmail.com)
+[debug] [2026-10-27T10:50:39.770Z] Checked if tokens are valid: false, expires at: 1792538167321
+[debug] [2026-10-27T10:50:39.770Z] Checked if tokens are valid: false, expires at: 1792538167321
+[debug] [2026-10-27T10:50:39.770Z] > refreshing access token with scopes: []
+[debug] [2026-10-27T10:50:39.773Z] >>> [apiv2][query] POST https://www.googleapis.com/oauth2/v3/token [none]
+[debug] [2026-10-27T10:50:39.774Z] >>> [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-10-27T10:50:40.244Z] <<< [apiv2][status] POST https://www.googleapis.com/oauth2/v3/token 200
+[debug] [2026-10-27T10:50:40.244Z] <<< [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-10-27T10:50:40.262Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects pageSize=100
+[debug] [2026-10-27T10:50:41.098Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects 200
+[debug] [2026-10-27T10:50:41.099Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects [omitted]
+[info] 
+=== Hosting Setup
+[debug] [2026-10-27T10:50:43.635Z] Checked if tokens are valid: true, expires at: 1793101839245
+[debug] [2026-10-27T10:50:43.635Z] Checked if tokens are valid: true, expires at: 1793101839245
+[debug] [2026-10-27T10:50:43.635Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/joelmtrader-598ac [none]
+[debug] [2026-10-27T10:50:44.054Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/joelmtrader-598ac 200
+[debug] [2026-10-27T10:50:44.054Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/joelmtrader-598ac {"projectId":"joelmtrader-598ac","projectNumber":"319928983721","displayName":"joelmtrader","name":"projects/joelmtrader-598ac","resources":{"hostingSite":"joelmtrader-598ac"},"state":"ACTIVE","labels":{"firebase":"enabled"},"etag":"1_c4f80d20-171a-4904-ac9e-b0b3e1dc63db"}
+[info] 
+[info] Your public directory is the folder (relative to your project directory) that
+[info] will contain Hosting assets to be uploaded with firebase deploy. If you
+[info] have a build process for your assets, use your build's output directory.
+[info] 
+[info] 
+[info] i  Detected a .git folder at C:\joelmtrader-final-project 
+[info] i  Authorizing with GitHub to upload your service account to a GitHub repository's secrets store. 
+[info] 
+[info] Visit this URL on this device to log in:
+[info] https://github.com/login/oauth/authorize?client_id=89cf50f02ac6aaed3484&state=921980266&redirect_uri=http%3A%2F%2Flocalhost%3A9005&scope=read%3Auser%20repo%20public_repo
+[info] 
+[info] Waiting for authentication...

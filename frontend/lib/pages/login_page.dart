@@ -17,7 +17,7 @@ class _LoginPageState extends State<LoginPage> {
   final _user = TextEditingController();
   final _pass = TextEditingController();
   late final TextEditingController _url;
-  bool _busy = false, _showServer = true, _hide = true;
+  bool _busy = false, _showServer = false, _hide = false;
   String? _error;
 
   @override
@@ -35,6 +35,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _login() async {
+    //if the password and usrname is empy give an error message
     if (_user.text.trim().isEmpty || _pass.text.isEmpty) {
       setState(() => _error = 'Enter your username and password');
       return;

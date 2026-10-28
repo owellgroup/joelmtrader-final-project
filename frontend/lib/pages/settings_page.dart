@@ -93,13 +93,13 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _slider(String key, String label, double min, double max, {int? divisions, String suffix = '', String? help}) {
-    final v = d(_risk![key]).clamp(min, max).toDouble();
+    final v = d(_risk![key], min).clamp(min, max).toDouble();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Expanded(child: Text(label, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
-          Text('${v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(1)}$suffix', style: const TextStyle(fontWeight: FontWeight.w900, color: Palette.brand)),
+          Text('${v == v.roundToDouble() ? v.toStringAsFixed(0) : (v < 0.1 ? v.toStringAsFixed(2) : v.toStringAsFixed(1))}$suffix', style: const TextStyle(fontWeight: FontWeight.w900, color: Palette.brand)),
         ]),
         Slider(value: v, min: min, max: max, divisions: divisions, onChanged: (x) => setState(() => _risk![key] = x)),
         if (help != null) Text(help, style: TextStyle(fontSize: 11, color: context.muted)),
@@ -182,23 +182,24 @@ class _SettingsPageState extends State<SettingsPage> {
       // ---------------- risk
       AppCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const SectionTitle('Risk management', subtitle: 'Applied by the engine before every trade'),
+          const SectionTitle('Scalp basket mode', subtitle: 'Bulk 0.01 tickets — no broker SL/TP. Bank basket $ profit, then hunt again.'),
           if (_risk == null)
             const Padding(padding: EdgeInsets.all(12), child: Text('Loading...'))
           else ...[
-            _slider('risk_per_trade_pct', 'Risk per trade', 0.5, 5, divisions: 9, suffix: '%', help: 'Share of equity lost if the stop-loss is hit.'),
-            _slider('micro_max_risk_pct', 'Micro-account hard cap per trade', 2, 15, divisions: 13, suffix: '%', help: 'With tiny balances the broker minimum lot can exceed your risk %. The bot only takes it if risk stays below this cap - otherwise it skips.'),
-            _slider('max_total_open_risk_pct', 'Max total open risk', 2, 20, divisions: 18, suffix: '%'),
-            _slider('max_positions', 'Max simultaneous positions', 1, 6, divisions: 5),
-            _slider('max_same_usd_direction', 'Max trades betting the same way on USD', 1, 3, divisions: 2, help: 'Gold, EURUSD and GBPUSD all move against the dollar.'),
-            _slider('max_same_jpy_direction', 'Max trades betting the same way on JPY', 1, 2, divisions: 1, help: 'GBPJPY and EURJPY are closely correlated.'),
+            ToggleLine(title: 'Scalp mode (bulk 0.01, no SL/TP)', value: _risk!['scalp_mode'] != false, onChanged: (v) => setState(() => _risk!['scalp_mode'] = v)),
+            _slider('scalp_lot', 'Lot size per ticket', 0.01, 0.1, divisions: 9, help: 'Every ticket in the basket uses this size (default 0.01).'),
+            _slider('scalp_equity_per_ticket', 'Equity per ticket', 10, 50, divisions: 40, suffix: r' $', help: 'About one 0.01 ticket per this many dollars of equity.'),
+            _slider('scalp_min_tickets', 'Minimum tickets in a basket', 2, 10, divisions: 8),
+            _slider('scalp_max_tickets', 'Maximum tickets in a basket', 5, 40, divisions: 35),
+            _slider('scalp_min_profit_usd', 'Min basket profit to bank', 1, 5, divisions: 16, suffix: r' $', help: 'Close the whole basket once every ticket is green and total profit reaches this.'),
+            _slider('scalp_protect_pct', 'Soft protect (% equity)', 0.5, 5, divisions: 18, suffix: '%', help: 'Emergency close if the basket floating loss reaches this % of equity. No broker stop is placed.'),
+            _slider('scalp_protect_floor_usd', 'Soft protect floor', 1, 10, divisions: 18, suffix: r' $'),
             _slider('daily_loss_limit_pct', 'Daily loss limit (pauses until next day)', 2, 20, divisions: 18, suffix: '%'),
             _slider('max_drawdown_pct', 'Max drawdown kill-switch', 5, 50, divisions: 45, suffix: '%'),
-            _slider('max_consecutive_losses', 'Losses in a row before cooldown', 1, 6, divisions: 5),
-            _slider('cooldown_minutes', 'Cooldown length', 5, 120, divisions: 23, suffix: ' min'),
-            _slider('min_score', 'Minimum opportunity score', 50, 90, divisions: 40, help: 'Higher = fewer but better trades.'),
-            _slider('min_rr', 'Minimum reward : risk', 1, 3, divisions: 20),
-            _slider('max_trade_minutes', 'Time stop (no follow-through)', 10, 180, divisions: 17, suffix: ' min'),
+            _slider('max_consecutive_losses', 'Losses in a row before cooldown', 1, 8, divisions: 7),
+            _slider('cooldown_minutes', 'Cooldown length', 5, 60, divisions: 11, suffix: ' min'),
+            _slider('min_score', 'Minimum opportunity score', 50, 85, divisions: 35, help: 'Higher = fewer but smarter scalps. Analysis still requires HTF lock + location + trigger.'),
+            _slider('max_trade_minutes', 'Dead-basket time stop', 5, 60, divisions: 11, suffix: ' min'),
             _slider('trade_start_utc', 'Trading window start (UTC hour)', 0, 23, divisions: 23),
             _slider('trade_end_utc', 'Trading window end (UTC hour)', 1, 24, divisions: 23),
             ToggleLine(title: 'Close trades before high-impact news', value: _risk!['close_before_news'] == true, onChanged: (v) => setState(() => _risk!['close_before_news'] = v)),

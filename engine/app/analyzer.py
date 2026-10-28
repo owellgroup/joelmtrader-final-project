@@ -4,7 +4,8 @@ import numpy as np
 
 from . import structure as st
 from .config import PRIORITY_SYMBOLS
-from .risk import risk_pct_at_min_lot, size_position, loss_per_lot
+from .risk import (risk_pct_at_min_lot, size_position, loss_per_lot,
+                   basket_trade_count, basket_profit_target, scalp_lot)
 
 # Daily and H4 decide where the market is going. Lower TFs only time the entry.
 HTF_W = {"D1": 0.22, "H4": 0.24, "H1": 0.20, "M30": 0.12, "M15": 0.12, "M10": 0.10}
@@ -206,15 +207,24 @@ def score_direction(d, c):
     if trig:
         why.append(f"Candlestick trigger: {trig}")
     if d * (r1.close - r1.ema20) > 0 and d * (r1.ema9 - r1.ema20) > 0:
-        D += 2
+        D += 3
         why.append("M1 EMA9/20 aligned with the trade")
     if d * (r10.close - r10.ema20) > 0:
         D += 2
         why.append("M10 close holds on the trade side of EMA20")
+    # Fast scalp timing: M1 + M5 must already be moving with the idea
+    if d * float(r1.macd_hist) > 0 and d * float(r5.macd_hist) > 0:
+        D += 2
+        why.append("M1/M5 MACD both agree — ready for a fast scalp in")
     cl = f1.df["close"].values
     if (d == 1 and cl[-1] > f1.df["high"].values[-6:-1].max()) or (d == -1 and cl[-1] < f1.df["low"].values[-6:-1].min()):
         D += 3
         why.append("M1 micro break of structure")
+    # Reject late chases: M1 already extended against a clean pullback entry
+    m1_ext = d * (float(r1.close) - float(r1.ema20)) / max(float(r1.atr), 1e-9)
+    if m1_ext > 2.2:
+        D -= 4
+        pen.append("M1 already extended — wait for a tighter scalp entry (-4)")
     fb = bo["false_breakout"]
     if fb and fb["direction"] == d:
         D += 6
@@ -321,8 +331,9 @@ def analyze_symbol(symbol, frames, tick, info, zones, cfg, perf, equity, news):
         pen.append("BUY and SELL scores are too close — no edge")
 
     plan = build_plan(d, tick, info, atr5, f5, zones, cfg, f15=f15)
+    scalp = bool(getattr(cfg, "scalp_mode", True))
     account_fix = None
-    if symbol in PRIORITY_SYMBOLS:
+    if not scalp and symbol in PRIORITY_SYMBOLS:
         _, _, unaffordable = size_position(equity, plan["sl_dist"], info, cfg)
         if unaffordable:
             tight = build_plan(d, tick, info, atr5, f5, zones, cfg, tight=True, f15=f15)
@@ -331,9 +342,12 @@ def analyze_symbol(symbol, frames, tick, info, zones, cfg, perf, equity, news):
                 plan = tight
                 account_fix = "Small-account fix: stop tightened to the minimum so the smallest lot fits the risk cap"
                 why.append(account_fix)
-    if plan["zone_block"]:
+    if plan["zone_block"] and not scalp:
         total -= 8
         pen.append(f"Opposing S/R zone only {plan['tp_dist'] / plan['sl_dist']:.1f}R away (-8)")
+    elif plan["zone_block"] and scalp:
+        # In scalp mode a nearby wall is fine — we bank $1–$2 and leave; just note it.
+        why.append("Nearby opposing S/R — scalp target is basket $ profit, not a far TP")
     adj = perf.adjust(symbol, setup)
     if adj:
         total += adj
@@ -341,7 +355,8 @@ def analyze_symbol(symbol, frames, tick, info, zones, cfg, perf, equity, news):
     total = clip(total, 0, 100)
 
     spread = plan["spread"]
-    spread_ratio = spread / plan["sl_dist"]
+    spread_ratio = spread / max(plan["sl_dist"], 1e-12)
+    spread_atr = spread / max(atr5, 1e-12)
     blocked_reasons = []
     news_blocked, news_reason = news.blocked(symbol, cfg)
     if wait_for_htf:
@@ -359,30 +374,51 @@ def analyze_symbol(symbol, frames, tick, info, zones, cfg, perf, equity, news):
         blocked_reasons.append("Blocked: no pullback / S/R / order-block / FVG location")
     if news_blocked:
         blocked_reasons.append(news_reason)
-    if spread_ratio > cfg.max_spread_to_sl:
+    max_spread_atr = float(getattr(cfg, "scalp_max_spread_atr", 0.22) or 0.22)
+    if scalp:
+        if spread_atr > max_spread_atr:
+            blocked_reasons.append(f"Spread too wide for scalping ({spread_atr * 100:.0f}% of ATR)")
+    elif spread_ratio > cfg.max_spread_to_sl:
         blocked_reasons.append(f"Spread too wide ({spread_ratio * 100:.0f}% of stop)")
-    if comp["trigger"] < 5:
+    if comp["trigger"] < (4 if scalp else 5):
         blocked_reasons.append("Waiting for M10/M5/M1 trigger")
     if setup == "MOMENTUM":
         blocked_reasons.append("Momentum-only chase is not allowed")
     if total < cfg.min_score:
         blocked_reasons.append(f"Score {total:.0f} < {cfg.min_score:.0f}")
-    if plan["rr"] < cfg.min_rr:
+    if not scalp and plan["rr"] < cfg.min_rr:
         blocked_reasons.append(f"R:R {plan['rr']:.2f} < {cfg.min_rr}")
-    lots, risk_amt, why_not = size_position(equity, plan["sl_dist"], info, cfg)
-    min_lot_risk = info["volume_min"] * loss_per_lot(plan["sl_dist"], info)
-    if why_not:
-        blocked_reasons.append("Unaffordable: " + why_not)
+
+    tickets = basket_trade_count(equity, cfg) if scalp else 1
+    lot = scalp_lot(info, cfg) if scalp else 0.0
+    if scalp:
+        lots, risk_amt, why_not = tickets * lot, 0.0, ""
+        min_lot_risk = 0.0
+        plan = dict(plan)
+        plan["sl"] = 0.0
+        plan["tp"] = 0.0
+        plan["note"] = f"Scalp basket: {tickets}×{lot:g} lots, bank ~${basket_profit_target(equity, tickets, cfg):.2f} then exit"
+        plan["basketTickets"] = tickets
+        plan["basketLot"] = lot
+        plan["basketTarget"] = round(basket_profit_target(equity, tickets, cfg), 2)
+        why.append(f"Scalp mode: {tickets}×{lot:g} tickets, no broker SL/TP — soft basket exit")
+        why.append(f"Spread {spread:.{info['digits']}f} = {spread_atr * 100:.0f}% of ATR")
+    else:
+        lots, risk_amt, why_not = size_position(equity, plan["sl_dist"], info, cfg)
+        min_lot_risk = info["volume_min"] * loss_per_lot(plan["sl_dist"], info)
+        if why_not:
+            blocked_reasons.append("Unaffordable: " + why_not)
+        if spread_ratio <= cfg.max_spread_to_sl:
+            why.append(f"Spread {spread:.{info['digits']}f} is only {spread_ratio * 100:.0f}% of the stop distance")
+        why.append(f"R:R {plan['rr']:.2f} ({plan['note']})")
+
     if symbol not in cfg.allowed_symbols:
         blocked_reasons.append("Symbol disabled in settings")
-    if spread_ratio <= cfg.max_spread_to_sl:
-        why.append(f"Spread {spread:.{info['digits']}f} is only {spread_ratio * 100:.0f}% of the stop distance")
-    why.append(f"R:R {plan['rr']:.2f} ({plan['note']})")
 
-    rank_score = total - 20 * min(spread_ratio, 1.0) - (30 if why_not else 0)
-    # Always publish BUY/SELL + score + plan like EURUSD/EURJPY — WAIT only means "not tradable yet".
+    spread_pen = min(spread_atr if scalp else spread_ratio, 1.0)
+    rank_score = total - 20 * spread_pen - (30 if why_not else 0)
     story = (
-        f"{plan['side']} idea from Daily {trends.get('D1', 0):+.2f} / H4 {trends.get('H4', 0):+.2f} / "
+        f"{plan['side']} scalp from Daily {trends.get('D1', 0):+.2f} / H4 {trends.get('H4', 0):+.2f} / "
         f"H1 {trends.get('H1', 0):+.2f} (HTF lock "
         f"{'BUY' if locked == 1 else 'SELL' if locked == -1 else 'none'}). "
         + (" ".join(why[:3]) if why else "Waiting for location and trigger.")
@@ -392,14 +428,15 @@ def analyze_symbol(symbol, frames, tick, info, zones, cfg, perf, equity, news):
         "setup": setup, "bias": round(bias, 3), "price": f(price, info["digits"]), "spread": f(spread, info["digits"]),
         "plan": {k: (f(v, info["digits"]) if isinstance(v, float) else v) for k, v in plan.items() if k != "zone_block"},
         "rr": round(plan["rr"], 2), "lots": lots, "riskAmount": round(risk_amt, 2),
-        "riskPctAtMinLot": round(risk_pct_at_min_lot(equity, plan["sl_dist"], info), 2),
+        "riskPctAtMinLot": round(risk_pct_at_min_lot(equity, plan["sl_dist"], info), 2) if not scalp else 0.0,
         "components": {k: round(v, 1) for k, v in comp.items()}, "reasons": why, "penalties": pen,
         "priority": symbol in PRIORITY_SYMBOLS, "accountFix": account_fix,
-        "affordability": {"affordable": not why_not, "minLotRisk": round(min_lot_risk, 2),
+        "affordability": {"affordable": True if scalp else not why_not, "minLotRisk": round(min_lot_risk, 2),
                           "riskCap": round(equity * cfg.micro_max_risk_pct / 100, 2),
-                          "balanceNeeded": round(min_lot_risk / max(cfg.micro_max_risk_pct, 1e-9) * 100, 2)},
+                          "balanceNeeded": 0 if scalp else round(min_lot_risk / max(cfg.micro_max_risk_pct, 1e-9) * 100, 2),
+                          "basketTickets": tickets if scalp else 1, "scalpLot": lot if scalp else None},
         "tradable": len(blocked_reasons) == 0, "blockedReasons": blocked_reasons,
         "timeframes": {tf: tf_summary(fr) for tf, fr in frames.items()},
         "htfLock": {1: "BUY", -1: "SELL", 0: "WAIT"}[locked],
-        "story": story,
+        "story": story, "scalpMode": scalp,
     }

@@ -10,7 +10,8 @@ from datetime import datetime, timezone
 from . import structure as st
 from .analyzer import analyze_symbol
 from .config import SYMBOLS, PRIORITY_SYMBOLS, USD_QUOTED, JPY_CROSSES, DATA_DIR, Settings
-from .risk import lock_floor_r, size_within_budget
+from .risk import (lock_floor_r, size_within_budget, scalp_lot, basket_trade_count,
+                   basket_profit_target, basket_protect_loss)
 
 log = logging.getLogger("bot")
 
@@ -248,8 +249,8 @@ class Bot:
         }
 
     def _check_priority_affordability(self, ranks, equity):
-        """Every scan: does the balance allow a trade on each priority symbol? If not, say exactly why."""
-        if not self.enabled:
+        """Explain sizing for priority symbols. Scalp mode uses fixed 0.01 baskets, not SL risk."""
+        if not self.enabled or getattr(self.cfg, "scalp_mode", True):
             return
         for r in ranks:
             a = r.get("affordability") or {}
@@ -309,7 +310,7 @@ class Bot:
     # ------------------------------------------------------------------ entries
     def _maybe_open(self, acct, now):
         cfg = self.cfg
-        if not self.scan_data or time.time() - self.last_scan_ts > 30 or len(self.tracked) >= cfg.max_positions:
+        if not self.scan_data or time.time() - self.last_scan_ts > 30:
             return
         if now - self.last_entry < cfg.min_entry_gap_seconds:
             return
@@ -319,9 +320,15 @@ class Bot:
                 return
         if not (cfg.trade_start_utc <= self._utc().hour < cfg.trade_end_utc):
             return
-        # Work like a human: best entry first, then the next best, each one sized to the risk room
-        # that is still free. A candidate that cannot be afforded is skipped, not forced.
-        acct = dict(acct)                           # local copy: free margin shrinks as we open trades
+        if getattr(cfg, "scalp_mode", True):
+            # One scalp basket at a time: bank it, then hunt the next entry.
+            if self.tracked:
+                return
+            self._maybe_open_scalp_basket(dict(acct), now)
+            return
+        if len(self.tracked) >= cfg.max_positions:
+            return
+        acct = dict(acct)
         budget_total = acct["equity"] * cfg.max_total_open_risk_pct / 100
         for cand in self.scan_data["rankings"]:
             if len(self.tracked) >= cfg.max_positions:
@@ -330,14 +337,96 @@ class Bot:
                 continue
             if self.sym_cooldown.get(cand["symbol"], 0) > now:
                 continue
-            usd = self._usd_dir(cand["symbol"], cand["side"])      # buying EUR/GBP/XAU = short USD
+            usd = self._usd_dir(cand["symbol"], cand["side"])
             if usd and sum(1 for m in self.tracked.values() if self._usd_dir(m["symbol"], m["side"]) == usd) >= cfg.max_same_usd_direction:
                 continue
-            jpy = self._jpy_dir(cand["symbol"], cand["side"])      # buying GBPJPY/EURJPY = short JPY
+            jpy = self._jpy_dir(cand["symbol"], cand["side"])
             if jpy and sum(1 for m in self.tracked.values() if self._jpy_dir(m["symbol"], m["side"]) == jpy) >= cfg.max_same_jpy_direction:
                 continue
             room = budget_total - sum(m["risk_amount"] for m in self.tracked.values())
-            self._execute(cand, acct, now, room)
+            self._execute_legacy(cand, acct, now, room)
+
+    def _maybe_open_scalp_basket(self, acct, now):
+        """Open N×0.01 tickets on the best smart setup — no broker SL/TP."""
+        cfg = self.cfg
+        for cand in self.scan_data["rankings"]:
+            if not cand.get("tradable") or not cand.get("plan"):
+                continue
+            if self.sym_cooldown.get(cand["symbol"], 0) > now:
+                continue
+            if self._open_scalp_basket(cand, acct, now):
+                return
+
+    def _open_scalp_basket(self, cand, acct, now):
+        s, d, plan = cand["symbol"], cand["direction"], cand["plan"]
+        info = self.info(s)
+        tick = self.broker.tick(s)
+        if not tick:
+            return False
+        atr = max(float(plan.get("sl_dist") or 0), 1e-9)   # build_plan still stores ATR-based distance
+        spread = tick["ask"] - tick["bid"]
+        entry = tick["ask"] if d == 1 else tick["bid"]
+        max_spread_atr = float(getattr(self.cfg, "scalp_max_spread_atr", 0.22) or 0.22)
+        if abs(entry - float(plan.get("entry") or entry)) > 0.55 * atr or spread > max_spread_atr * atr:
+            self.log_event(f"{s}: skipped - price/spread moved before scalp basket; re-scanning")
+            self.last_entry = now
+            self.sym_cooldown[s] = now + 8
+            self.last_scan_ts = 0
+            return False
+
+        lot = scalp_lot(info, self.cfg)
+        want = int(plan.get("basketTickets") or basket_trade_count(acct["equity"], self.cfg))
+        want = max(int(getattr(self.cfg, "scalp_min_tickets", 2)), min(want, int(getattr(self.cfg, "scalp_max_tickets", 30))))
+        target = float(plan.get("basketTarget") or basket_profit_target(acct["equity"], want, self.cfg))
+        protect = basket_protect_loss(acct["equity"], want, self.cfg)
+
+        # Fit as many 0.01 tickets as free margin allows (keep ~35% free).
+        opened = 0
+        basket_id = f"{s}-{int(now)}"
+        for i in range(want):
+            margin = self.broker.margin_required(s, cand["side"], lot)
+            if margin > acct["free_margin"] * 0.65:
+                if opened == 0:
+                    self._skip_note(s, f"not enough free margin for even one {lot:g} scalp ticket")
+                    return False
+                break
+            res = self.broker.send_market(s, cand["side"], lot, 0, 0, f"SC {cand['setup'][:10]}")
+            if not res.get("ok"):
+                if opened == 0:
+                    self.log_event(f"{s}: scalp order rejected - {res.get('msg')}", "warning")
+                    self.sym_cooldown[s] = now + 60
+                    self.last_entry = now
+                    return False
+                self.log_event(f"{s}: basket partial fill after {opened} tickets ({res.get('msg')})")
+                break
+            ticket = res["ticket"]
+            acct["free_margin"] = max(0.0, acct["free_margin"] - margin)
+            meta = dict(symbol=s, side=cand["side"], entry=res["price"], sl0=0.0, risk_dist=atr, open_ts=now,
+                        setup=cand["setup"], score=cand["score"], risk_amount=0.0, lots=lot, be_done=False,
+                        balance_before=acct["balance"], miss=0, peak_r=0.0, peak_profit=0.0,
+                        basket_id=basket_id, basket_target=target, basket_protect=protect, scalp=True)
+            self.tracked[ticket] = meta
+            self.stats["opened"] += 1
+            opened += 1
+            self.rep.emit("TRADE_OPENED", dict(ticket=ticket, symbol=s, side=cand["side"], lots=lot, openPrice=res["price"],
+                                               stopLoss=0, takeProfit=0, openTime=int(time.time()), score=cand["score"],
+                                               setup=cand["setup"], reasons=cand["reasons"], balanceBefore=acct["balance"],
+                                               riskAmount=0, rr=0, basketId=basket_id, basketTarget=target,
+                                               mode="SCALP"), self.session_id)
+        self.last_entry = now
+        if opened:
+            # Refresh target/protect to the tickets actually filled
+            target = basket_profit_target(acct["equity"], opened, self.cfg)
+            protect = basket_protect_loss(acct["equity"], opened, self.cfg)
+            for m in self.tracked.values():
+                if m.get("basket_id") == basket_id:
+                    m["basket_target"] = target
+                    m["basket_protect"] = protect
+            self.log_event(
+                f"SCALP OPEN {cand['side']} {s} ×{opened} @ {lot:g} (score {cand['score']:.0f}, "
+                f"{cand['setup']}) — bank ${target:.2f}+ then exit; soft protect -${protect:.2f}")
+            return True
+        return False
 
     def _skip_note(self, symbol, text):
         """Explain a skipped entry in the activity log, at most once a minute per symbol."""
@@ -345,7 +434,8 @@ class Bot:
             self._skip_logged[symbol] = time.time()
             self.log_event(f"{symbol}: skipped - {text}")
 
-    def _execute(self, cand, acct, now, risk_room):
+    def _execute_legacy(self, cand, acct, now, risk_room):
+        """Legacy single-trade SL/TP path (only when scalp_mode is off)."""
         s, d, plan = cand["symbol"], cand["direction"], cand["plan"]
         info = self.info(s)
         tick = self.broker.tick(s)
@@ -357,7 +447,7 @@ class Bot:
             self.log_event(f"{s}: skipped - price moved/spread widened before entry; re-scanning")
             self.last_entry = now
             self.sym_cooldown[s] = now + 15
-            self.last_scan_ts = 0                    # force a fresh plan on the next loop
+            self.last_scan_ts = 0
             return False
         lots, risk_amt, why_not = size_within_budget(acct["equity"], sl_dist, info, self.cfg, risk_room)
         if lots <= 0:
@@ -379,7 +469,7 @@ class Bot:
         acct["free_margin"] = acct["free_margin"] - margin
         meta = dict(symbol=s, side=cand["side"], entry=res["price"], sl0=sl, risk_dist=sl_dist, open_ts=now,
                     setup=cand["setup"], score=cand["score"], risk_amount=risk_amt, lots=lots, be_done=False,
-                    balance_before=acct["balance"], miss=0, peak_r=0.0, peak_profit=0.0)
+                    balance_before=acct["balance"], miss=0, peak_r=0.0, peak_profit=0.0, scalp=False)
         self.tracked[ticket] = meta
         self.stats["opened"] += 1
         self.log_event(f"OPEN {cand['side']} {s} {lots} lots @ {res['price']} SL {sl} TP {tp} (score {cand['score']:.0f}, {cand['setup']})")
@@ -394,10 +484,14 @@ class Bot:
         for p in self.broker.positions():
             if p["ticket"] not in self.tracked:
                 rd = abs(p["price_open"] - p["sl"]) if p["sl"] else 0
-                self.tracked[p["ticket"]] = dict(symbol=p["symbol"], side=p["side"], entry=p["price_open"], sl0=p["sl"],
+                scalp = not p.get("sl") and not p.get("tp")
+                self.tracked[p["ticket"]] = dict(symbol=p["symbol"], side=p["side"], entry=p["price_open"], sl0=p["sl"] or 0,
                                                  risk_dist=rd or 1e-9, open_ts=self._now(), setup="ADOPTED", score=0,
                                                  risk_amount=0, lots=p["volume"], be_done=False, balance_before=0, miss=0,
-                                                 peak_r=0.0, peak_profit=max(float(p.get("profit") or 0), 0.0))
+                                                 peak_r=0.0, peak_profit=max(float(p.get("profit") or 0), 0.0),
+                                                 scalp=scalp, basket_id=f"adopt-{p['symbol']}",
+                                                 basket_target=float(getattr(self.cfg, "scalp_min_profit_usd", 1.5) or 1.5),
+                                                 basket_protect=float(getattr(self.cfg, "scalp_protect_floor_usd", 2.5) or 2.5))
 
     def _sync_positions(self):
         live = {p["ticket"]: p for p in self.broker.positions()}
@@ -457,6 +551,96 @@ class Bot:
         cfg, now = self.cfg, self._now()
         live = {p["ticket"]: p for p in self.broker.positions()}
         u = self._utc()
+        if getattr(cfg, "scalp_mode", True) or any(m.get("scalp") for m in self.tracked.values()):
+            self._manage_scalp_baskets(live, now, u)
+            return
+        self._manage_legacy_positions(live, now, u)
+
+    def _close_tickets(self, tickets, reason):
+        ok = True
+        for t in tickets:
+            if not self._close(t, reason):
+                ok = False
+        return ok
+
+    def _manage_scalp_baskets(self, live, now, u):
+        """Fast in/out: bank meaningful basket $ profit; soft-protect the account; never use broker SL/TP."""
+        cfg = self.cfg
+        # Group live tracked tickets by basket_id (fallback: symbol+side)
+        groups = {}
+        for t, m in list(self.tracked.items()):
+            p = live.get(t)
+            if not p:
+                continue
+            key = m.get("basket_id") or f"{m['symbol']}|{m['side']}"
+            groups.setdefault(key, []).append((t, m, p))
+
+        keep_pct = float(getattr(cfg, "scalp_giveback_keep_pct", 55.0) or 55.0) / 100.0
+        for key, rows in groups.items():
+            s = rows[0][1]["symbol"]
+            side = 1 if rows[0][1]["side"] == "BUY" else -1
+            profits = [float(p.get("profit") or 0) + float(p.get("swap") or 0) for _, _, p in rows]
+            total = sum(profits)
+            all_green = all(x > 0 for x in profits)
+            tickets = [t for t, _, _ in rows]
+            target = max(float(rows[0][1].get("basket_target") or getattr(cfg, "scalp_min_profit_usd", 1.5)),
+                         float(getattr(cfg, "scalp_min_profit_usd", 1.5) or 1.5))
+            protect = float(rows[0][1].get("basket_protect") or basket_protect_loss(
+                (self.broker.account() or {}).get("equity", 100), len(rows), cfg))
+            open_ts = min(m["open_ts"] for _, m, _ in rows)
+            minutes = (now - open_ts) / 60
+            peak = 0.0
+            for _, m, p in rows:
+                pr = float(p.get("profit") or 0)
+                m["peak_profit"] = max(float(m.get("peak_profit") or 0), pr)
+                peak = max(peak, float(m.get("peak_profit") or 0))
+            # Track basket peak on the first meta row
+            basket_peak = max(float(rows[0][1].get("basket_peak") or 0), total)
+            for _, m, _ in rows:
+                m["basket_peak"] = basket_peak
+
+            if cfg.close_before_news and self.news.imminent(s, 3, time.time()):
+                self._close_tickets(tickets, "Scalp basket closed ahead of high-impact news"); continue
+            if self.broker.name == "mt5" and u.weekday() == 4 and u.hour >= 21:
+                self._close_tickets(tickets, "Scalp basket closed before the weekend"); continue
+
+            # Soft account protection — no fake broker stop-loss numbers
+            if total <= -protect:
+                self._close_tickets(tickets, f"Soft protect: basket loss ${total:.2f} hit -${protect:.2f} cap")
+                continue
+
+            # Primary scalp exit: every ticket green AND meaningful USD banked
+            if all_green and total >= target:
+                self._close_tickets(tickets, f"Scalp banked ${total:.2f} (target ${target:.2f}) — looking for next entry")
+                continue
+
+            # Don't give profit away: once we had a real run, lock most of it
+            if basket_peak >= target and total > 0 and total < basket_peak * keep_pct:
+                self._close_tickets(
+                    tickets,
+                    f"Scalp giveback lock: peak ${basket_peak:.2f} → ${total:.2f} (kept {keep_pct * 100:.0f}% rule)")
+                continue
+
+            # If peak was strong and we are still above target even if one ticket dipped, bank it
+            if basket_peak >= target * 1.35 and total >= target:
+                self._close_tickets(tickets, f"Scalp runner banked ${total:.2f} (peak ${basket_peak:.2f})")
+                continue
+
+            # Hard M5 flip against a flat/losing basket — get out fast
+            f5 = self.md.frame(s, "M5")
+            if f5 is not None and total < target * 0.5 and minutes >= 2:
+                against = [x for x in st.candle_patterns(f5.df) if x[1] == -side and x[2] >= 0.85]
+                if against and side * float(f5.df.macd_hist.iloc[-1]) < 0 and side * f5.struct.get("trend", 0) < -0.15:
+                    self._close_tickets(tickets, f"M5 flip ({against[0][0]}) — abort scalp ${total:+.2f}")
+                    continue
+
+            # Dead basket: no follow-through
+            if minutes > cfg.max_trade_minutes and total < target * 0.35 and basket_peak < target * 0.7:
+                self._close_tickets(tickets, f"Scalp time-stop {minutes:.0f}m — no follow-through (${total:+.2f})")
+                continue
+
+    def _manage_legacy_positions(self, live, now, u):
+        cfg = self.cfg
         for t, m in list(self.tracked.items()):
             p = live.get(t)
             if not p:
@@ -480,10 +664,8 @@ class Bot:
                 self._close(t, "Closed ahead of high-impact news"); continue
             if self.broker.name == "mt5" and u.weekday() == 4 and u.hour >= 21:
                 self._close(t, "Closed before the weekend"); continue
-            # Time-stop only dead trades. Never dump a winner that already ran (the $4 → $1 case).
             if minutes > cfg.max_trade_minutes and r < 0.15 and peak < 0.55:
                 self._close(t, f"Time stop after {minutes:.0f} min - no follow-through ({r:+.1f}R)"); continue
-            # Only flatten on a real M15 reversal, and only while the trade has not yet become a runner.
             f15 = self.md.frame(s, "M15")
             if f15 is not None and 0.35 <= r < 1.05 and peak < 1.15:
                 against = [x for x in st.candle_patterns(f15.df) if x[1] == -side and x[2] >= 0.8]
@@ -502,7 +684,6 @@ class Bot:
                 if (be - p["sl"]) * side > 0:
                     new_sl = be
                 m["be_done"] = True
-            # Structure trail: sit behind the latest M5 swing once we are a runner, never looser than the lock.
             if peak >= cfg.trail_start_r:
                 f5 = self.md.frame(s, "M5")
                 swing = None
@@ -541,4 +722,8 @@ class Bot:
                 "cooldownUntil": self.cooldown_until if self.cooldown_until > self._now() else None,
                 "consecutiveLosses": self.consec_losses, "openPositions": len(self.tracked), "stats": self.stats,
                 "account": acct, "broker": self.broker.status(), "activity": list(self.activity)[:25],
-                "peakEquity": self.peak_equity, "mode": self.broker.name}
+                "peakEquity": self.peak_equity, "mode": self.broker.name,
+                "strategy": "SCALP_BASKET" if getattr(self.cfg, "scalp_mode", True) else "CLASSIC",
+                "scalp": {"lot": getattr(self.cfg, "scalp_lot", 0.01),
+                          "minProfit": getattr(self.cfg, "scalp_min_profit_usd", 1.5),
+                          "openBaskets": len({m.get("basket_id") for m in self.tracked.values() if m.get("basket_id")})}}

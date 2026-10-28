@@ -1,4 +1,4 @@
-"""Position sizing & risk helpers."""
+"""Position sizing, basket sizing & soft account-protection helpers."""
 import math
 
 
@@ -13,10 +13,7 @@ def round_volume(vol: float, info: dict) -> float:
 
 
 def size_position(equity: float, sl_dist: float, info: dict, cfg):
-    """Returns (lots, risk_amount, reject_reason).
-    Normal case: lots = risk$ / loss-per-lot, rounded DOWN to the lot step.
-    Micro accounts: if the broker minimum lot already risks more than the target, accept it only when the
-    resulting risk is still below `micro_max_risk_pct`; otherwise the trade is skipped (account protection)."""
+    """Legacy SL-based sizing (kept for charts / non-scalp paths)."""
     per_lot = loss_per_lot(sl_dist, info)
     if per_lot <= 0:
         return 0.0, 0.0, "invalid stop distance"
@@ -31,9 +28,6 @@ def size_position(equity: float, sl_dist: float, info: dict, cfg):
 
 
 def size_within_budget(equity: float, sl_dist: float, info: dict, cfg, budget: float):
-    """Like size_position, but never risks more than `budget` dollars (the risk room still free
-    after the trades that are already open). The lot size is scaled down to fit when possible.
-    Returns (lots, risk_amount, reject_reason)."""
     lots, risk, why = size_position(equity, sl_dist, info, cfg)
     if lots <= 0:
         return lots, risk, why
@@ -52,11 +46,7 @@ def risk_pct_at_min_lot(equity: float, sl_dist: float, info: dict) -> float:
 
 
 def lock_floor_r(peak_r: float):
-    """Once a trade has run, never give the bulk of that profit back.
-
-    A $4 runner that retraces to $1 is the failure this prevents: after +2R we lock
-    about 70% of the peak, so the stop sits near +1.4R instead of back at entry.
-    """
+    """Legacy R-multiple lock (unused in scalp basket mode)."""
     if peak_r >= 3.0:
         return peak_r - 0.50
     if peak_r >= 2.2:
@@ -70,3 +60,47 @@ def lock_floor_r(peak_r: float):
     if peak_r >= 0.55:
         return 0.05
     return None
+
+
+# ---------------------------------------------------------------- scalping basket
+def scalp_lot(info: dict, cfg) -> float:
+    """Always 0.01 when the broker allows it; otherwise the broker minimum."""
+    want = float(getattr(cfg, "scalp_lot", 0.01) or 0.01)
+    step = float(info.get("volume_step") or 0.01)
+    vmin = float(info.get("volume_min") or 0.01)
+    vmax = float(info.get("volume_max") or 100)
+    lot = max(vmin, round(want / step) * step)
+    return round(min(lot, vmax), 2)
+
+
+def basket_trade_count(equity: float, cfg) -> int:
+    """How many 0.01 tickets to open from account size.
+
+    Rough guide: about one micro ticket per $20–$25 of equity, floored and capped.
+    Tiny accounts still open a small bulk so the basket can bank $1–$2 together.
+    """
+    per = float(getattr(cfg, "scalp_equity_per_ticket", 22.0) or 22.0)
+    mn = int(getattr(cfg, "scalp_min_tickets", 2) or 2)
+    mx = int(getattr(cfg, "scalp_max_tickets", 30) or 30)
+    n = int(equity / max(per, 1.0))
+    return max(mn, min(mx, n if n > 0 else mn))
+
+
+def basket_profit_target(equity: float, tickets: int, cfg) -> float:
+    """Meaningful USD profit before the whole basket is closed.
+
+    At least scalp_min_profit_usd ($1–$2), scaling gently with ticket count and equity
+    so a 10-ticket basket does not exit on a tiny blip.
+    """
+    base = float(getattr(cfg, "scalp_min_profit_usd", 1.5) or 1.5)
+    per = float(getattr(cfg, "scalp_profit_per_ticket", 0.12) or 0.12)
+    eq_boost = equity * float(getattr(cfg, "scalp_profit_equity_pct", 0.15) or 0.15) / 100.0
+    return max(base, tickets * per, eq_boost)
+
+
+def basket_protect_loss(equity: float, tickets: int, cfg) -> float:
+    """Soft emergency: close the whole basket if floating loss reaches this (no broker SL)."""
+    pct = float(getattr(cfg, "scalp_protect_pct", 1.8) or 1.8)
+    floor = float(getattr(cfg, "scalp_protect_floor_usd", 2.5) or 2.5)
+    per = float(getattr(cfg, "scalp_protect_per_ticket", 0.35) or 0.35)
+    return max(floor, equity * pct / 100.0, tickets * per)

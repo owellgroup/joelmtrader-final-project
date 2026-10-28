@@ -14,6 +14,7 @@ TIMEFRAMES = ["D1", "H4", "H1", "M30", "M15", "M10", "M5", "M1"]
 TF_SECONDS = {"M1": 60, "M5": 300, "M10": 600, "M15": 900, "M30": 1800, "H1": 3600, "H4": 14400, "D1": 86400}
 SYMBOL_ALIASES = {"GOLD": "XAUUSD", "XAU": "XAUUSD", "XAUUSDM": "XAUUSD"}
 UNIVERSE_VERSION = 2                                              # bump when the live symbol list changes
+SCALP_MODE_VERSION = 1                                            # bump when default scalp risk profile changes
 
 # Broker spellings we try before giving up (Headway, XM, IC Markets, Exness, …)
 BROKER_NAME_TRIES = {
@@ -56,32 +57,49 @@ class Settings:
 
 @dataclass
 class RiskConfig:
-    risk_per_trade_pct: float = 2.0         # % of equity risked per trade
-    micro_max_risk_pct: float = 7.0         # hard cap when the broker's minimum lot forces more risk
-    max_total_open_risk_pct: float = 8.0    # sum of risk of all open trades
-    max_positions: int = 3
-    max_same_usd_direction: int = 2         # correlation guard (EURUSD/GBPUSD/XAUUSD all share USD)
-    max_same_jpy_direction: int = 2         # correlation guard (GBPJPY/EURJPY share JPY)
-    daily_loss_limit_pct: float = 8.0       # halts trading until next UTC day
-    max_drawdown_pct: float = 25.0          # from session peak equity -> kill switch
-    max_consecutive_losses: int = 3
-    cooldown_minutes: int = 15
-    symbol_cooldown_minutes: int = 5
-    min_score: float = 66.0                 # minimum opportunity score (0-100)
-    min_rr: float = 1.6                     # minimum net reward:risk
-    max_spread_to_sl: float = 0.20          # spread must be <= 20% of the stop distance
+    # ---- scalp basket mode (no classic SL/TP on orders) ----
+    scalp_mode: bool = True                 # bulk 0.01 tickets; exit on basket $ profit
+    scalp_lot: float = 0.01                 # every ticket uses this lot size
+    scalp_equity_per_ticket: float = 22.0   # ~1 ticket per this many $ of equity
+    scalp_min_tickets: int = 2
+    scalp_max_tickets: int = 30
+    scalp_min_profit_usd: float = 1.5       # bank at least this much basket profit
+    scalp_profit_per_ticket: float = 0.12   # scales target with basket size
+    scalp_profit_equity_pct: float = 0.15   # soft target floor vs equity
+    scalp_protect_pct: float = 1.8          # soft emergency close if basket loss ≥ this % equity
+    scalp_protect_floor_usd: float = 2.5
+    scalp_protect_per_ticket: float = 0.35
+    scalp_giveback_keep_pct: float = 55.0   # if peak hit target, close when only this % of peak remains
+    scalp_max_spread_atr: float = 0.22      # spread vs M5 ATR (replaces SL-based spread gate)
+    scalp_mode_version: int = 0
+
+    # ---- shared guards / analysis ----
+    risk_per_trade_pct: float = 2.0         # legacy (charts); unused for scalp lot sizing
+    micro_max_risk_pct: float = 7.0
+    max_total_open_risk_pct: float = 8.0
+    max_positions: int = 40                 # room for a full scalp basket
+    max_same_usd_direction: int = 2
+    max_same_jpy_direction: int = 2
+    daily_loss_limit_pct: float = 8.0
+    max_drawdown_pct: float = 25.0
+    max_consecutive_losses: int = 4
+    cooldown_minutes: int = 10
+    symbol_cooldown_minutes: int = 3
+    min_score: float = 60.0                 # smart but fast enough for scalps
+    min_rr: float = 0.0                     # unused in scalp mode (no TP/SL)
+    max_spread_to_sl: float = 0.20          # legacy path only
     news_before_min: int = 30
     news_after_min: int = 15
     break_even_r: float = 0.6
     trail_start_r: float = 1.0
-    max_trade_minutes: int = 90
-    universe_version: int = 0               # settings-file migration marker
+    max_trade_minutes: int = 25             # dead basket time-stop (minutes)
+    universe_version: int = 0
     trade_start_utc: int = 6
     trade_end_utc: int = 20
     close_before_news: bool = True
-    min_entry_gap_seconds: int = 20
+    min_entry_gap_seconds: int = 5          # fast re-entry after a banked basket
     allowed_symbols: list = field(default_factory=lambda: list(SYMBOLS))
-    known_symbols: list = field(default_factory=lambda: list(SYMBOLS))   # symbols the saved settings already knew about
+    known_symbols: list = field(default_factory=lambda: list(SYMBOLS))
 
 
 class ConfigStore:
@@ -96,6 +114,7 @@ class ConfigStore:
         except Exception:
             pass
         self._ensure_universe()
+        self._ensure_scalp_mode()
 
     def _ensure_universe(self):
         """Older saves listed only EURUSD/GBPUSD/XAUUSD, or marked JPY as 'known' then left them off.
@@ -109,6 +128,36 @@ class ConfigStore:
                 allowed.append(s)
         self.update({"allowed_symbols": allowed, "known_symbols": list(SYMBOLS),
                      "universe_version": UNIVERSE_VERSION}, persist=True)
+
+    def _ensure_scalp_mode(self):
+        """One-time migrate saved risk settings onto the scalp basket profile."""
+        ver = int(getattr(self.cfg, "scalp_mode_version", 0) or 0)
+        if ver >= SCALP_MODE_VERSION:
+            return
+        self.update({
+            "scalp_mode": True,
+            "scalp_lot": 0.01,
+            "scalp_equity_per_ticket": 22.0,
+            "scalp_min_tickets": 2,
+            "scalp_max_tickets": 30,
+            "scalp_min_profit_usd": 1.5,
+            "scalp_profit_per_ticket": 0.12,
+            "scalp_profit_equity_pct": 0.15,
+            "scalp_protect_pct": 1.8,
+            "scalp_protect_floor_usd": 2.5,
+            "scalp_protect_per_ticket": 0.35,
+            "scalp_giveback_keep_pct": 55.0,
+            "scalp_max_spread_atr": 0.22,
+            "max_positions": 40,
+            "min_score": 60.0,
+            "min_rr": 0.0,
+            "max_trade_minutes": 25,
+            "min_entry_gap_seconds": 5,
+            "max_consecutive_losses": 4,
+            "cooldown_minutes": 10,
+            "symbol_cooldown_minutes": 3,
+            "scalp_mode_version": SCALP_MODE_VERSION,
+        }, persist=True)
 
     def update(self, data: dict, persist=True):
         with self._lock:

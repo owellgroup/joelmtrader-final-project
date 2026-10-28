@@ -14,7 +14,7 @@ TIMEFRAMES = ["D1", "H4", "H1", "M30", "M15", "M10", "M5", "M1"]
 TF_SECONDS = {"M1": 60, "M5": 300, "M10": 600, "M15": 900, "M30": 1800, "H1": 3600, "H4": 14400, "D1": 86400}
 SYMBOL_ALIASES = {"GOLD": "XAUUSD", "XAU": "XAUUSD", "XAUUSDM": "XAUUSD"}
 UNIVERSE_VERSION = 2                                              # bump when the live symbol list changes
-SCALP_MODE_VERSION = 1                                            # bump when default scalp risk profile changes
+SCALP_MODE_VERSION = 3                                            # bump when default scalp risk profile changes
 
 # Broker spellings we try before giving up (Headway, XM, IC Markets, Exness, …)
 BROKER_NAME_TRIES = {
@@ -70,7 +70,7 @@ class RiskConfig:
     scalp_protect_floor_usd: float = 2.5
     scalp_protect_per_ticket: float = 0.35
     scalp_giveback_keep_pct: float = 55.0   # if peak hit target, close when only this % of peak remains
-    scalp_max_spread_atr: float = 0.22      # spread vs M5 ATR (replaces SL-based spread gate)
+    scalp_max_spread_atr: float = 0.55      # legacy/unused as hard gate; pip ceilings decide
     scalp_mode_version: int = 0
 
     # ---- shared guards / analysis ----
@@ -85,7 +85,7 @@ class RiskConfig:
     max_consecutive_losses: int = 4
     cooldown_minutes: int = 10
     symbol_cooldown_minutes: int = 3
-    min_score: float = 60.0                 # smart but fast enough for scalps
+    min_score: float = 63.0                 # quality floor for well-calculated scalps
     min_rr: float = 0.0                     # unused in scalp mode (no TP/SL)
     max_spread_to_sl: float = 0.20          # legacy path only
     news_before_min: int = 30
@@ -147,9 +147,9 @@ class ConfigStore:
             "scalp_protect_floor_usd": 2.5,
             "scalp_protect_per_ticket": 0.35,
             "scalp_giveback_keep_pct": 55.0,
-            "scalp_max_spread_atr": 0.22,
+            "scalp_max_spread_atr": 0.55,
             "max_positions": 40,
-            "min_score": 60.0,
+            "min_score": 63.0,
             "min_rr": 0.0,
             "max_trade_minutes": 25,
             "min_entry_gap_seconds": 5,

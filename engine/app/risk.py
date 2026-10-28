@@ -104,3 +104,79 @@ def basket_protect_loss(equity: float, tickets: int, cfg) -> float:
     floor = float(getattr(cfg, "scalp_protect_floor_usd", 2.5) or 2.5)
     per = float(getattr(cfg, "scalp_protect_per_ticket", 0.35) or 0.35)
     return max(floor, equity * pct / 100.0, tickets * per)
+
+
+# Typical broker scalping ceilings in *pips*. Generous enough for retail brokers.
+_SCALP_MAX_PIPS = {
+    "XAUUSD": 80.0,   # gold often quotes 20–60 points
+    "GBPJPY": 6.0,
+    "EURJPY": 5.5,
+    "EURUSD": 3.0,
+    "GBPUSD": 3.5,
+}
+
+
+def pip_size(info: dict, symbol: str = "") -> float:
+    """One pip in price units from broker point/digits (and symbol family fallback)."""
+    point = float(info.get("point") or info.get("tick_size") or 0)
+    digits = int(info.get("digits") or 0)
+    if point <= 0:
+        if symbol == "XAUUSD":
+            return 0.01
+        if symbol.endswith("JPY"):
+            return 0.01
+        return 0.0001
+    # 3/5-digit FX: pip = 10 points. Gold 2-digit: pip ≈ point (often 0.01).
+    if digits in (3, 5) or (digits == 0 and point in (0.001, 0.00001)):
+        return point * 10.0
+    if symbol == "XAUUSD" or digits == 2:
+        return max(point, 0.01)
+    if digits == 4:
+        return point * 10.0
+    return point * 10.0
+
+
+def spread_pips(spread: float, info: dict, symbol: str = "") -> float:
+    return float(spread) / max(pip_size(info, symbol), 1e-12)
+
+
+def scalp_spread_ok(symbol: str, spread: float, atr: float, info: dict, cfg,
+                    price: float | None = None) -> tuple[bool, str]:
+    """Pip-first spread gate. Tiny M5 ATR must NEVER block a normal quote.
+
+    Previous bug: quiet ATR made spread/ATR look huge on every pair (EURUSD, gold, JPY).
+    Now we only reject clearly fat pip spreads for that symbol.
+    """
+    sp = max(float(spread or 0), 0.0)
+    if sp <= 0:
+        return True, "spread flat / unavailable"
+    atr_v = float(atr) if atr and atr == atr else 0.0          # NaN-safe
+    pip = pip_size(info, symbol)
+    pips = sp / pip
+    max_pips = float(_SCALP_MAX_PIPS.get(symbol, 4.0))
+    soft_pips = max_pips * 1.45          # retail brokers swing a bit
+    hard_pips = max_pips * 2.2           # only this is a hard reject
+
+    # Sanity: if pip_size is wrong, pips explode — fall back to % of mid price
+    if pips > 500 and price and price > 0:
+        pct = sp / price * 10000.0       # approx "pips" as 0.01% units
+        if pct <= soft_pips * 2:
+            return True, f"spread {sp:g} (~{pct:.1f} bp) ok for {symbol}"
+        if pct > hard_pips * 2:
+            return False, f"Spread too wide ({pct:.1f} bp) for {symbol}"
+        return True, f"spread {sp:g} accepted for {symbol}"
+
+    # Primary rule: normal pip ceiling always passes (ignore ATR)
+    if pips <= soft_pips:
+        return True, f"{pips:.1f} pip spread (ok for {symbol})"
+
+    # Extreme pip spread → reject
+    if pips > hard_pips:
+        return False, f"Spread too wide ({pips:.1f} pips) for {symbol}"
+
+    # Borderline pips: only reject if ATR is *healthy* and spread eats most of it
+    atr_pips = atr_v / pip if atr_v > 0 else 0.0
+    if atr_pips >= 8 and sp > 0.55 * atr_v:
+        return False, f"Spread too wide ({pips:.1f} pips on quiet ATR) for {symbol}"
+
+    return True, f"{pips:.1f} pip spread (accepted for {symbol})"

@@ -11,7 +11,7 @@ from . import structure as st
 from .analyzer import analyze_symbol
 from .config import SYMBOLS, PRIORITY_SYMBOLS, USD_QUOTED, JPY_CROSSES, DATA_DIR, Settings
 from .risk import (lock_floor_r, size_within_budget, scalp_lot, basket_trade_count,
-                   basket_profit_target, basket_protect_loss)
+                   basket_profit_target, basket_protect_loss, scalp_spread_ok)
 
 log = logging.getLogger("bot")
 
@@ -366,9 +366,9 @@ class Bot:
         atr = max(float(plan.get("sl_dist") or 0), 1e-9)   # build_plan still stores ATR-based distance
         spread = tick["ask"] - tick["bid"]
         entry = tick["ask"] if d == 1 else tick["bid"]
-        max_spread_atr = float(getattr(self.cfg, "scalp_max_spread_atr", 0.22) or 0.22)
-        if abs(entry - float(plan.get("entry") or entry)) > 0.55 * atr or spread > max_spread_atr * atr:
-            self.log_event(f"{s}: skipped - price/spread moved before scalp basket; re-scanning")
+        ok_spread, spread_note = scalp_spread_ok(s, spread, atr, info, self.cfg, price=entry)
+        if abs(entry - float(plan.get("entry") or entry)) > 0.55 * atr or not ok_spread:
+            self.log_event(f"{s}: skipped - price/spread moved before scalp basket ({spread_note}); re-scanning")
             self.last_entry = now
             self.sym_cooldown[s] = now + 8
             self.last_scan_ts = 0

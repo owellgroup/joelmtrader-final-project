@@ -1,7 +1,8 @@
 """Unit tests for direction lock and scalp basket helpers (no MT5)."""
 from app.analyzer import htf_direction
 from app.config import RiskConfig
-from app.risk import lock_floor_r, basket_trade_count, basket_profit_target, basket_protect_loss, scalp_lot
+from app.risk import (lock_floor_r, basket_trade_count, basket_profit_target, basket_protect_loss,
+                      scalp_lot, scalp_spread_ok)
 
 
 def test_htf_follows_daily_and_h4():
@@ -50,6 +51,21 @@ def test_scalp_lot_defaults_to_001():
     assert scalp_lot(info, cfg) == 0.01
 
 
+def test_normal_spreads_pass_even_on_tiny_atr():
+    """Quiet M5 ATR must not block EURUSD / gold / JPY with normal broker spreads."""
+    cfg = RiskConfig()
+    jpy = {"digits": 3, "point": 0.001}
+    maj = {"digits": 5, "point": 0.00001}
+    gold = {"digits": 2, "point": 0.01}
+    assert scalp_spread_ok("GBPJPY", 0.025, 0.04, jpy, cfg)[0]          # tiny ATR
+    assert scalp_spread_ok("EURJPY", 0.022, 0.035, jpy, cfg)[0]
+    assert scalp_spread_ok("EURUSD", 0.00012, 0.00015, maj, cfg, price=1.08)[0]
+    assert scalp_spread_ok("GBPUSD", 0.00018, 0.00020, maj, cfg, price=1.27)[0]
+    assert scalp_spread_ok("XAUUSD", 0.35, 0.40, gold, cfg, price=2650.0)[0]
+    bad, msg = scalp_spread_ok("EURUSD", 0.0012, 0.0004, maj, cfg, price=1.08)  # 12 pips
+    assert not bad and "too wide" in msg.lower()
+
+
 if __name__ == "__main__":
     test_htf_follows_daily_and_h4()
     test_htf_prefers_h4_when_daily_disagrees()
@@ -59,4 +75,5 @@ if __name__ == "__main__":
     test_basket_profit_is_meaningful()
     test_soft_protect_exists()
     test_scalp_lot_defaults_to_001()
+    test_normal_spreads_pass_even_on_tiny_atr()
     print("OK")

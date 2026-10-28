@@ -5,7 +5,8 @@ import numpy as np
 from . import structure as st
 from .config import PRIORITY_SYMBOLS
 from .risk import (risk_pct_at_min_lot, size_position, loss_per_lot,
-                   basket_trade_count, basket_profit_target, scalp_lot)
+                   basket_trade_count, basket_profit_target, scalp_lot, scalp_spread_ok,
+                   spread_pips, _SCALP_MAX_PIPS)
 
 # Daily and H4 decide where the market is going. Lower TFs only time the entry.
 HTF_W = {"D1": 0.22, "H4": 0.24, "H1": 0.20, "M30": 0.12, "M15": 0.12, "M10": 0.10}
@@ -374,13 +375,29 @@ def analyze_symbol(symbol, frames, tick, info, zones, cfg, perf, equity, news):
         blocked_reasons.append("Blocked: no pullback / S/R / order-block / FVG location")
     if news_blocked:
         blocked_reasons.append(news_reason)
-    max_spread_atr = float(getattr(cfg, "scalp_max_spread_atr", 0.22) or 0.22)
+    spread_note = ""
     if scalp:
-        if spread_atr > max_spread_atr:
-            blocked_reasons.append(f"Spread too wide for scalping ({spread_atr * 100:.0f}% of ATR)")
+        ok_spread, spread_note = scalp_spread_ok(symbol, spread, atr5, info, cfg, price=price)
+        if not ok_spread:
+            blocked_reasons.append(spread_note)
     elif spread_ratio > cfg.max_spread_to_sl:
         blocked_reasons.append(f"Spread too wide ({spread_ratio * 100:.0f}% of stop)")
-    if comp["trigger"] < (4 if scalp else 5):
+    # Quality gates — calculated scalps only (location + momentum + not chop/exhausted)
+    if scalp:
+        r5q = frames["M5"].df.iloc[-1]
+        r15q = frames["M15"].df.iloc[-1]
+        r1q = frames["M1"].df.iloc[-1]
+        if not located:
+            blocked_reasons.append("Blocked: need pullback / S/R / order-block / FVG (no mid-air scalp)")
+        if d * float(r5q.macd_hist) <= 0 or d * float(r1q.macd_hist) <= 0:
+            blocked_reasons.append("Blocked: waiting for M1+M5 MACD to agree with the scalp side")
+        if float(r15q.adx) < 14:
+            blocked_reasons.append(f"Blocked: M15 ADX {float(r15q.adx):.0f} — market too choppy to scalp")
+        if (d == 1 and float(r5q.rsi) > 72) or (d == -1 and float(r5q.rsi) < 28):
+            blocked_reasons.append(f"Blocked: M5 RSI {float(r5q.rsi):.0f} exhausted for a scalp")
+        if abs(d * (price - float(r5q.ema20)) / max(atr5, 1e-12)) > 1.8:
+            blocked_reasons.append("Blocked: price too extended from M5 EMA20 — wait for value")
+    if comp["trigger"] < 5:
         blocked_reasons.append("Waiting for M10/M5/M1 trigger")
     if setup == "MOMENTUM":
         blocked_reasons.append("Momentum-only chase is not allowed")
@@ -402,7 +419,8 @@ def analyze_symbol(symbol, frames, tick, info, zones, cfg, perf, equity, news):
         plan["basketLot"] = lot
         plan["basketTarget"] = round(basket_profit_target(equity, tickets, cfg), 2)
         why.append(f"Scalp mode: {tickets}×{lot:g} tickets, no broker SL/TP — soft basket exit")
-        why.append(f"Spread {spread:.{info['digits']}f} = {spread_atr * 100:.0f}% of ATR")
+        if spread_note:
+            why.append(spread_note)
     else:
         lots, risk_amt, why_not = size_position(equity, plan["sl_dist"], info, cfg)
         min_lot_risk = info["volume_min"] * loss_per_lot(plan["sl_dist"], info)
@@ -415,7 +433,13 @@ def analyze_symbol(symbol, frames, tick, info, zones, cfg, perf, equity, news):
     if symbol not in cfg.allowed_symbols:
         blocked_reasons.append("Symbol disabled in settings")
 
-    spread_pen = min(spread_atr if scalp else spread_ratio, 1.0)
+    # Mild spread ranking only — never bury a good setup because ATR was quiet
+    if scalp:
+        sp_pips = spread_pips(spread, info, symbol)
+        cap = float(_SCALP_MAX_PIPS.get(symbol, 4.0))
+        spread_pen = min(sp_pips / max(cap, 1e-9), 1.0) * 0.35
+    else:
+        spread_pen = min(spread_ratio, 1.0)
     rank_score = total - 20 * spread_pen - (30 if why_not else 0)
     story = (
         f"{plan['side']} scalp from Daily {trends.get('D1', 0):+.2f} / H4 {trends.get('H4', 0):+.2f} / "
